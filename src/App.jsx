@@ -227,13 +227,13 @@ export default function App() {
         tr:last-child td{border-bottom:none}
         tr:hover td{background:#faf8f4}
         .sep{height:1px;background:#e8e2d8;margin:16px 0}
-        h1{font-family:'Playfair Display',serif;font-size:32px;font-weight:400;letter-spacing:-0.02em;line-height:1.1}
-        h2{font-family:'Playfair Display',serif;font-size:24px;font-weight:400;letter-spacing:-0.01em}
+        h1{font-family:'Playfair Display',serif;font-size:32px;font-weight:500;letter-spacing:-0.02em;line-height:1.1;color:#1a1a1a}
+        h2{font-family:'Playfair Display',serif;font-size:24px;font-weight:500;letter-spacing:-0.01em;color:#1a1a1a}
         h3{font-size:11px;font-weight:600;color:#6a6050;margin-bottom:14px;letter-spacing:0.08em;text-transform:uppercase}
         .serif{font-family:'Playfair Display',serif}
         .serif-italic{font-family:'Playfair Display',serif;font-style:italic}
-        .stat-num{font-family:'Playfair Display',serif;font-size:42px;line-height:1;font-weight:400}
-        .section-eyebrow{font-family:'Playfair Display',serif;font-size:14px;font-style:italic;font-weight:400;color:#a09080;margin-bottom:4px}
+        .stat-num{font-family:'Playfair Display',serif;font-size:42px;line-height:1;font-weight:500;color:#1a1a1a}
+        .section-eyebrow{font-family:'Playfair Display',serif;font-size:14px;font-style:italic;font-weight:400;color:#8a7868;margin-bottom:4px}
         .ok-box{background:#edf7f0;border:1px solid #b5dcc0;border-radius:8px;padding:11px 14px;font-size:12px;color:#2d6a4f}
         .err-box{background:#fef0ee;border:1px solid #f0c0ba;border-radius:8px;padding:11px 14px;font-size:12px;color:#b83020}
         .warn-box{background:#fef5e8;border:1px solid #f0d5a0;border-radius:8px;padding:11px 14px;font-size:12px;color:#a05800}
@@ -248,6 +248,14 @@ export default function App() {
         .modal{background:#fff;border-radius:16px;padding:28px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.15)}
         @media(max-width:640px){.g2,.g3,.g4,.g5{grid-template-columns:1fr 1fr}}
         @media(max-width:400px){.g2,.g3,.g4,.g5{grid-template-columns:1fr}}
+        @media(max-width:640px){
+          .brand-text{display:none!important}
+          .brand-divider{display:none!important}
+          .nav-sync-text{display:none!important}
+          .nav-inner{padding:0 8px!important}
+          h1{font-size:26px!important}
+          h2{font-size:20px!important}
+        }
       `}</style>
 
       {/* Moderate stock popup */}
@@ -277,12 +285,12 @@ export default function App() {
 
       {/* Nav */}
       <nav style={{ background: "#fff", borderBottom: "1px solid #e8e2d8", position: "sticky", top: 0, zIndex: 200 }}>
-        <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center" }}>
+        <div className="nav-inner" style={{ maxWidth: 980, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center" }}>
           {/* Brand */}
-          <div style={{ padding: "11px 0", marginRight: 20, paddingRight: 20, borderRight: "1px solid #e8e2d8", flexShrink: 0 }}>
+          <div className="brand-divider" style={{ padding: "11px 0", marginRight: 20, paddingRight: 20, borderRight: "1px solid #e8e2d8", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ width: 30, height: 30, background: "#1a1a1a", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📦</div>
-              <div>
+              <div className="brand-text">
                 <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
                   <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 500, letterSpacing: "-0.01em", color: "#1a1a1a" }}>SK Traders</span>
                   <span style={{ fontSize: 10, color: "#b0a898", fontWeight: 400, letterSpacing: "0.06em", textTransform: "uppercase" }}>KraftTrack</span>
@@ -290,17 +298,30 @@ export default function App() {
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", overflowX: "auto", flex: 1 }}>
+          {/* On mobile: just the icon, no divider */}
+          <div style={{ display: "none" }} className="brand-mobile">
+            <div style={{ width: 28, height: 28, background: "#1a1a1a", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, marginRight: 8, flexShrink: 0 }}>📦</div>
+          </div>
+          <div style={{ display: "flex", overflowX: "auto", flex: 1, scrollbarWidth: "none" }}>
             {TABS.map(t => (
-              <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#1a1a1a" : "transparent"}`, padding: "13px 13px", fontSize: 12, fontWeight: tab === t ? 600 : 400, color: tab === t ? "#1a1a1a" : "#9a9080", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
+              <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#1a1a1a" : "transparent"}`, padding: "13px 11px", fontSize: 12, fontWeight: tab === t ? 600 : 400, color: tab === t ? "#1a1a1a" : "#9a9080", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
             ))}
           </div>
-          <div style={{ fontSize: 10, color: saveError ? "#b83020" : "#b0a898", paddingLeft: 14, whiteSpace: "nowrap", display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <div className="nav-sync-text" style={{ fontSize: 10, color: saveError ? "#b83020" : "#b0a898", paddingLeft: 14, whiteSpace: "nowrap", display: "flex", alignItems: "center", flexShrink: 0 }}>
             {syncing
               ? <><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#b0a898", display: "inline-block", marginRight: 5 }} />Syncing…</>
               : saveError
                 ? <><span className="sync-dot-err" />Offline</>
                 : <><span className="sync-dot" />{lastSaved ? "Saved" : "Live"}</>
+            }
+          </div>
+          {/* Mobile sync dot only */}
+          <div style={{ flexShrink: 0, paddingLeft: 6 }}>
+            {syncing
+              ? <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#b0a898", display: "inline-block" }} />
+              : saveError
+                ? <span className="sync-dot-err" />
+                : <span className="sync-dot" />
             }
           </div>
         </div>
