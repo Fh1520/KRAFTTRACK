@@ -1024,7 +1024,12 @@ function HistoryTab({ state, update }) {
   const challanMap = {};
   sold.forEach(r => {
     const key = r.soldChallanNo ? r.soldChallanNo : `__${r.soldDate}__${r.soldTo}`;
-    if (!challanMap[key]) challanMap[key] = { challanNo: r.soldChallanNo || null, date: r.soldDate, customer: r.soldTo, reels: [] };
+    if (!challanMap[key]) {
+      challanMap[key] = { challanNo: r.soldChallanNo || null, date: r.soldDate, customer: r.soldTo || "", reels: [] };
+    } else if (!challanMap[key].customer && r.soldTo) {
+      // recover customer name from another reel in the same challan if first was blank
+      challanMap[key].customer = r.soldTo;
+    }
     challanMap[key].reels.push(r);
   });
 
@@ -1117,23 +1122,28 @@ function HistoryTab({ state, update }) {
               <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #f3ede4" : "none" }}>
                 {/* Challan header */}
                 <div onClick={() => !isEditing && setOpenChallan(prev => prev === key ? null : key)}
-                  style={{ padding: "14px 18px", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 12, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
+                  style={{ padding: "12px 16px", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
                   onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#faf8f4"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
-                  <div style={{ minWidth: 88, flexShrink: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>{fmtDate(ch.date)}</div>
-                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 14, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ch.customer || "—"}</div>
-                    {ch.challanNo && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>Challan {ch.challanNo}</div>}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <span className="tag tag-red" style={{ fontSize: 11 }}>{ch.reels.length} reel{ch.reels.length !== 1 ? "s" : ""}</span>
-                    <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
-                    {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 3).map(sz => (
-                      <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}"</span>
-                    ))}
-                    {Object.keys(bySizeInChallan).length > 3 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 3} more</span>}
+                    {/* Line 1: customer name + reels badge */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1a", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ch.customer || "—"}
+                      </span>
+                      <span className="tag tag-red" style={{ fontSize: 11, flexShrink: 0 }}>{ch.reels.length} reel{ch.reels.length !== 1 ? "s" : ""}</span>
+                    </div>
+                    {/* Line 2: date · challan no · kg · size tags */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, color: "#9a9080", fontWeight: 500 }}>{fmtDate(ch.date)}</span>
+                      {ch.challanNo && <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#9a9080" }}>Ch {ch.challanNo}</span></>}
+                      <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
+                      <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
+                      {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 4).map(sz => (
+                        <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}"</span>
+                      ))}
+                      {Object.keys(bySizeInChallan).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 4}</span>}
+                    </div>
                   </div>
                   <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
@@ -1228,7 +1238,10 @@ function HistoryTab({ state, update }) {
                               : <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 150, overflowY: "auto" }}>
                                   {avail.map(r => (
                                     <button key={r.id}
-                                      onClick={() => addReelToChallan(r.id, editForm.date || ch.date, editForm.customer || ch.customer, editForm.challanNo !== undefined ? editForm.challanNo : (ch.challanNo || ""))}
+                                      onClick={() => {
+                                        const customer = editForm.customer || ch.reels.find(x => x.soldTo)?.soldTo || ch.customer || "";
+                                        addReelToChallan(r.id, editForm.date || ch.date, customer, editForm.challanNo !== undefined ? editForm.challanNo : (ch.challanNo || ""));
+                                      }}
                                       title={`Add ${r.size}" ${fmt(r.weight)} kg to this challan`}
                                       style={{ background: "#edf7f0", border: "1px solid #b5dcc0", borderRadius: 7, padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
                                       <span className="serif" style={{ fontSize: 17 }}>{r.size}"</span>
