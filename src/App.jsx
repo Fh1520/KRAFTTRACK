@@ -735,30 +735,51 @@ function StockTab({ state, update }) {
   if (view === "size") {
     const sz = filter.size;
     const allForSize = state.stock.filter(r => r.size === sz);
-    const availForSize = allForSize.filter(r => !r.sold);
-    const soldForSize = allForSize.filter(r => r.sold).sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate));
-    const inwardGroups = {};
-    allForSize.forEach(r => {
-      const key = r.invoiceNo || r.inwardDate || "Unknown";
-      if (!inwardGroups[key]) inwardGroups[key] = { invoiceNo: r.invoiceNo, date: r.inwardDate, supplier: r.supplier, reels: [] };
-      inwardGroups[key].reels.push(r);
+    // Build separate data per grade so stock/inward/outward are never mixed
+    const gradeKeys = [...new Set(allForSize.map(r => `${r.bf}|${r.gsm}|${r.shade}`))].sort();
+    const gradeData = gradeKeys.map(gk => {
+      const [bf, gsm, shade] = gk.split("|");
+      const gradeReels = allForSize.filter(r => r.bf === bf && r.gsm === gsm && r.shade === shade);
+      const availForGrade = gradeReels.filter(r => !r.sold);
+      const soldForGrade = gradeReels.filter(r => r.sold).sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate));
+      const inwardGroups = {};
+      gradeReels.forEach(r => {
+        const key = r.invoiceNo || r.inwardDate || "Unknown";
+        if (!inwardGroups[key]) inwardGroups[key] = { invoiceNo: r.invoiceNo, date: r.inwardDate, supplier: r.supplier, reels: [] };
+        inwardGroups[key].reels.push(r);
+      });
+      const challanGroups = {};
+      soldForGrade.forEach(r => {
+        const key = r.soldChallanNo || `${r.soldDate}|${r.soldTo}`;
+        if (!challanGroups[key]) challanGroups[key] = { challanNo: r.soldChallanNo, date: r.soldDate, customer: r.soldTo, reels: [] };
+        challanGroups[key].reels.push(r);
+      });
+      const challanList = Object.values(challanGroups).sort((a, b) => new Date(b.date) - new Date(a.date));
+      return { bf, gsm, shade, availForGrade, inwardGroups, challanList };
     });
-    const challanGroups = {};
-    soldForSize.forEach(r => {
-      const key = r.soldChallanNo || `${r.soldDate}|${r.soldTo}`;
-      if (!challanGroups[key]) challanGroups[key] = { challanNo: r.soldChallanNo, date: r.soldDate, customer: r.soldTo, reels: [] };
-      challanGroups[key].reels.push(r);
-    });
-    const challanList = Object.values(challanGroups).sort((a, b) => new Date(b.date) - new Date(a.date));
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }} className="fade-in">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button className="btn btn-outline btn-sm" onClick={() => { setView("list"); setFilter(f => ({ ...f, size: "" })); }}>← Back</button>
           <div><div className="section-eyebrow">Size Detail</div><h2>{sz}" Reels — Full History</h2></div>
         </div>
-        <EditableStockForSize sz={sz} availForSize={availForSize} update={update} />
-        <SizeInwardHistory sz={sz} inwardGroups={inwardGroups} />
-        <SizeOutwardHistory sz={sz} challanList={challanList} />
+        {gradeData.map((gd, gi) => (
+          <div key={`${gd.bf}|${gd.gsm}|${gd.shade}`} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {gradeData.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: "#f5f0e8", border: "1px solid #e5dece", borderRadius: 10 }}>
+                <span className="serif" style={{ fontSize: 18, color: "#1a1a1a" }}>{gd.bf} BF · {gd.gsm} GSM</span>
+                <span className="tag" style={{ textTransform: "capitalize" }}>{gd.shade}</span>
+                <span style={{ fontSize: 12, color: "#9a9080", marginLeft: 2 }}>
+                  {gd.availForGrade.length} available · {gd.availForGrade.reduce((s, r) => s + Number(r.weight), 0) > 0 ? fmt(gd.availForGrade.reduce((s, r) => s + Number(r.weight), 0)) + " kg" : "0 kg"}
+                </span>
+              </div>
+            )}
+            <EditableStockForSize sz={sz} availForSize={gd.availForGrade} update={update} />
+            <SizeInwardHistory sz={sz} inwardGroups={gd.inwardGroups} />
+            <SizeOutwardHistory sz={sz} challanList={gd.challanList} />
+            {gi < gradeData.length - 1 && <div style={{ height: 1, background: "#e8e2d8", margin: "6px 0" }} />}
+          </div>
+        ))}
       </div>
     );
   }
@@ -771,6 +792,7 @@ function StockTab({ state, update }) {
     if (filter.bf && r.bf !== filter.bf) return;
     if (filter.gsm && r.gsm !== filter.gsm) return;
     if (filter.shade && r.shade !== filter.shade) return;
+    if (filter.size && r.size !== filter.size) return;
     const k = `${r.size}|${r.bf}|${r.gsm}`;
     if (!sizeGroupMap[k]) sizeGroupMap[k] = { size: r.size, bf: r.bf, gsm: r.gsm, shade: r.shade, reels: [], soldReels: [] };
     if (r.sold) sizeGroupMap[k].soldReels.push(r);
@@ -799,6 +821,12 @@ function StockTab({ state, update }) {
             <label className="lbl">Shade</label>
             <select value={filter.shade} onChange={e => setFilter(f => ({ ...f, shade: e.target.value }))}>
               <option value="">All</option>{SHADE_OPTIONS.map(o => <option key={o} style={{ textTransform: "capitalize" }}>{o}</option>)}
+            </select>
+          </div>
+          <div style={{ minWidth: 110 }}>
+            <label className="lbl">Size</label>
+            <select value={filter.size} onChange={e => setFilter(f => ({ ...f, size: e.target.value }))}>
+              <option value="">All Sizes</option>{SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
             </select>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
