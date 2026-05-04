@@ -766,8 +766,8 @@ function StockTab({ state, update }) {
   // ── LIST VIEW ──
   const available = state.stock.filter(r => !r.sold);
   const sizeGroupMap = {};
-  const stockToShow = filter.showSold ? state.stock : available;
-  stockToShow.forEach(r => {
+  // Always iterate ALL stock so sizes with 0 available still appear in the list
+  state.stock.forEach(r => {
     if (filter.bf && r.bf !== filter.bf) return;
     if (filter.gsm && r.gsm !== filter.gsm) return;
     if (filter.shade && r.shade !== filter.shade) return;
@@ -990,6 +990,7 @@ function HistoryTab({ state, update }) {
   const [editingChallan, setEditingChallan] = useState(null); // key of challan being edited
   const [editForm, setEditForm] = useState({});
   const [confirmDeleteChallan, setConfirmDeleteChallan] = useState(null);
+  const [addReelFilter, setAddReelFilter] = useState({ bf: "", gsm: "", size: "" });
 
   const sold = state.stock.filter(r => r.sold);
   const challanMap = {};
@@ -1029,6 +1030,24 @@ function HistoryTab({ state, update }) {
       }
     });
     setEditingChallan(null);
+  };
+
+  const deleteReelFromChallan = (reelId) => {
+    update(s => {
+      s.stock = s.stock.map(r => r.id === reelId
+        ? { ...r, sold: false, soldDate: undefined, soldTo: undefined, soldChallanNo: undefined }
+        : r
+      );
+    });
+  };
+
+  const addReelToChallan = (reelId, challanDate, challanCustomer, challanNo) => {
+    update(s => {
+      s.stock = s.stock.map(r => r.id === reelId
+        ? { ...r, sold: true, soldDate: challanDate, soldTo: challanCustomer, soldChallanNo: challanNo }
+        : r
+      );
+    });
   };
 
   const deleteChallan = (ch) => {
@@ -1097,30 +1116,106 @@ function HistoryTab({ state, update }) {
 
                     {/* Edit form */}
                     {isEditing ? (
-                      <div style={{ marginBottom: 16, background: "#fff", border: "1.5px solid #8b6914", borderRadius: 10, padding: "14px 16px" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#8b6914", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Challan Details</div>
-                        <div className="g3" style={{ marginBottom: 10 }}>
-                          <div>
-                            <label className="lbl">Customer</label>
-                            <CustomerInput value={editForm.customer} onChange={v => setEditForm(f => ({ ...f, customer: v }))} customers={state.customers || []} />
+                      <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                        {/* Header fields */}
+                        <div style={{ background: "#fff", border: "1.5px solid #8b6914", borderRadius: 10, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#8b6914", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Challan Details</div>
+                          <div className="g3" style={{ marginBottom: 10 }}>
+                            <div>
+                              <label className="lbl">Customer</label>
+                              <CustomerInput value={editForm.customer} onChange={v => setEditForm(f => ({ ...f, customer: v }))} customers={state.customers || []} />
+                            </div>
+                            <div>
+                              <label className="lbl">Date</label>
+                              <input type="date" value={editForm.date} onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} />
+                            </div>
+                            <div>
+                              <label className="lbl">Challan No</label>
+                              <input value={editForm.challanNo} onChange={e => setEditForm(f => ({ ...f, challanNo: e.target.value }))} placeholder="e.g. CH-101" />
+                            </div>
                           </div>
-                          <div>
-                            <label className="lbl">Date</label>
-                            <input type="date" value={editForm.date} onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} />
-                          </div>
-                          <div>
-                            <label className="lbl">Challan No</label>
-                            <input value={editForm.challanNo} onChange={e => setEditForm(f => ({ ...f, challanNo: e.target.value }))} placeholder="e.g. CH-101" />
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button className="btn btn-dark btn-sm" onClick={() => saveEditChallan(ch, key)}>✓ Save Header</button>
+                            <button className="btn btn-outline btn-sm" onClick={() => setEditingChallan(null)}>Done</button>
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button className="btn btn-dark btn-sm" onClick={() => saveEditChallan(ch, key)}>✓ Save Changes</button>
-                          <button className="btn btn-outline btn-sm" onClick={() => setEditingChallan(null)}>Cancel</button>
+
+                        {/* Reels in challan — delete individual */}
+                        <div style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#6a6050", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                            Reels in This Challan — {ch.reels.length} reels
+                          </div>
+                          {ch.reels.length === 0
+                            ? <div style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic" }}>No reels — add some below.</div>
+                            : <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                {ch.reels.sort((a, b) => Number(a.size) - Number(b.size)).map(r => (
+                                  <div key={r.id} style={{ background: "#fef0ee", border: "1px solid #f0c0ba", borderRadius: 7, padding: "6px 10px", display: "flex", alignItems: "center", gap: 7 }}>
+                                    <span className="serif" style={{ fontSize: 17 }}>{r.size}"</span>
+                                    <span style={{ fontSize: 12, color: "#9a4030", fontWeight: 500 }}>{fmt(r.weight)} kg</span>
+                                    <span style={{ fontSize: 10, color: "#c0a898" }}>{r.bf} BF</span>
+                                    <button
+                                      onClick={() => deleteReelFromChallan(r.id)}
+                                      title="Remove from challan (returns to stock)"
+                                      style={{ background: "transparent", color: "#b83020", border: "1px solid #f0c0ba", borderRadius: 4, padding: "1px 6px", fontSize: 11, cursor: "pointer", lineHeight: 1.5 }}>
+                                      ✕
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                          }
+                        </div>
+
+                        {/* Add reel from available stock */}
+                        <div style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#6a6050", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Add Reel from Available Stock</div>
+                          <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                            <div style={{ flex: 1, minWidth: 130 }}>
+                              <label className="lbl">Grade</label>
+                              <select value={`${addReelFilter.bf}|${addReelFilter.gsm}`}
+                                onChange={e => { const [bf, gsm] = e.target.value.split("|"); setAddReelFilter(f => ({ ...f, bf, gsm })); }}
+                                style={{ fontSize: 12 }}>
+                                <option value="|">All grades</option>
+                                {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
+                              </select>
+                            </div>
+                            <div style={{ flex: 1, minWidth: 110 }}>
+                              <label className="lbl">Size</label>
+                              <select value={addReelFilter.size}
+                                onChange={e => setAddReelFilter(f => ({ ...f, size: e.target.value }))}
+                                style={{ fontSize: 12 }}>
+                                <option value="">All sizes</option>
+                                {SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+                              </select>
+                            </div>
+                          </div>
+                          {(() => {
+                            const avail = state.stock.filter(r =>
+                              !r.sold
+                              && (!addReelFilter.bf || r.bf === addReelFilter.bf)
+                              && (!addReelFilter.gsm || r.gsm === addReelFilter.gsm)
+                              && (!addReelFilter.size || r.size === addReelFilter.size)
+                            ).sort((a, b) => Number(a.size) - Number(b.size));
+                            return avail.length === 0
+                              ? <div style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic" }}>No available stock matches this filter.</div>
+                              : <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 150, overflowY: "auto" }}>
+                                  {avail.map(r => (
+                                    <button key={r.id}
+                                      onClick={() => addReelToChallan(r.id, editForm.date || ch.date, editForm.customer || ch.customer, editForm.challanNo !== undefined ? editForm.challanNo : (ch.challanNo || ""))}
+                                      title={`Add ${r.size}" ${fmt(r.weight)} kg to this challan`}
+                                      style={{ background: "#edf7f0", border: "1px solid #b5dcc0", borderRadius: 7, padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                                      <span className="serif" style={{ fontSize: 17 }}>{r.size}"</span>
+                                      <span style={{ color: "#2d6a4f", fontWeight: 500 }}>{fmt(r.weight)} kg</span>
+                                      <span style={{ fontSize: 10, color: "#6a9a7a" }}>{r.bf} BF</span>
+                                      <span style={{ fontSize: 13, color: "#2d6a4f", marginLeft: 2 }}>＋</span>
+                                    </button>
+                                  ))}
+                                </div>;
+                          })()}
                         </div>
                       </div>
                     ) : (
                       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                        <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); startEditChallan(ch, key); }}>✎ Edit Details</button>
+                        <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); startEditChallan(ch, key); }}>✎ Edit / Manage Reels</button>
                         <button onClick={e => { e.stopPropagation(); setConfirmDeleteChallan({ ch, key }); }}
                           style={{ background: "transparent", color: "#b83020", border: "1.5px solid #f0c0ba", borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
                           🗑 Undo Sale
