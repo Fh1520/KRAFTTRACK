@@ -255,6 +255,9 @@ export default function App() {
           .nav-inner{padding:0 8px!important}
           h1{font-size:26px!important}
           h2{font-size:20px!important}
+          .card{padding:14px!important}
+          .card-flat .card{padding:14px!important}
+          .stat-num{font-size:32px!important}
         }
       `}</style>
 
@@ -327,7 +330,7 @@ export default function App() {
         </div>
       </nav>
 
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "28px 20px" }} className="fade-in">
+      <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in">
         {tab === "Home"     && <HomeTab     state={state} setTab={setTab} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} />}
         {tab === "Stock"    && <StockTab    state={state} update={update} />}
         {tab === "Sell"     && <SellTab     state={state} update={update} />}
@@ -851,36 +854,36 @@ function StockTab({ state, update }) {
             const isModerate = lowCount === 3;
             return (
               <div key={`${grp.size}${grp.bf}${grp.gsm}`}
-                style={{ padding: "14px 18px", borderBottom: idx < sizeGroups.length - 1 ? "1px solid #f3ede4" : "none", cursor: "pointer", transition: "background 0.12s" }}
+                style={{ padding: "12px 16px", borderBottom: idx < sizeGroups.length - 1 ? "1px solid #f3ede4" : "none", cursor: "pointer", transition: "background 0.12s" }}
                 onClick={() => { setFilter(f => ({ ...f, size: grp.size })); setView("size"); }}
                 onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 52 }}>
-                    <span className="serif" style={{ fontSize: 26, lineHeight: 1, color: isCritical ? "#a05800" : isModerate ? "#2a4a7a" : "#1a1a1a" }}>{grp.size}"</span>
-                  </div>
-                  <span className="tag" style={{ flexShrink: 0 }}>{grp.bf} BF · {grp.gsm} GSM</span>
-                  <div style={{ flex: 1, display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
-                    {grp.reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r) => (
-                      <span key={r.id} style={{ background: "#f8f7f4", border: "1px solid #e8e2d8", borderRadius: 5, padding: "3px 8px", fontSize: 12, color: "#3a3a3a", fontWeight: 500 }}>
-                        {fmt(r.weight)}
-                      </span>
-                    ))}
-                    {grp.reels.length === 0 && <span style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic" }}>No stock</span>}
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: isCritical ? "#a05800" : "#1a1a1a" }}>
-                      {grp.reels.length} reel{grp.reels.length !== 1 ? "s" : ""}
-                      {isCritical && <span className="tag tag-orange" style={{ marginLeft: 6, fontSize: 10 }}>Low</span>}
-                      {isModerate && <span className="tag tag-blue" style={{ marginLeft: 6, fontSize: 10 }}>3 left</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{fmt(totalWtGrp)} kg</div>
+                {/* Line 1: size + grade + count + status + arrow */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: grp.reels.length > 0 ? 6 : 0 }}>
+                  <span className="serif" style={{ fontSize: 26, lineHeight: 1, color: isCritical ? "#a05800" : isModerate ? "#2a4a7a" : "#1a1a1a", minWidth: 48, flexShrink: 0 }}>{grp.size}"</span>
+                  <span className="tag" style={{ flexShrink: 0, fontSize: 11 }}>{grp.bf} BF · {grp.gsm} GSM</span>
+                  <div style={{ flex: 1 }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                    {grp.reels.length === 0
+                      ? <span style={{ fontSize: 11, color: "#b0a898", fontStyle: "italic" }}>No stock</span>
+                      : <span style={{ fontSize: 12, fontWeight: 600, color: isCritical ? "#a05800" : "#1a1a1a" }}>{grp.reels.length} reel{grp.reels.length !== 1 ? "s" : ""}</span>
+                    }
+                    {isCritical && <span className="tag tag-orange" style={{ fontSize: 10 }}>Low</span>}
+                    {isModerate && <span className="tag tag-blue" style={{ fontSize: 10 }}>3 left</span>}
+                    {filter.showSold && grp.soldReels.length > 0 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{grp.soldReels.length} sold</span>}
                   </div>
                   <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0 }}>›</div>
                 </div>
-                {filter.showSold && grp.soldReels.length > 0 && (
-                  <div style={{ marginTop: 6, fontSize: 11, color: "#9a9080", paddingLeft: 52 }}>
-                    + {grp.soldReels.length} sold
+                {/* Line 2: weight chips (capped at 6) + total */}
+                {grp.reels.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingLeft: 48 }}>
+                    {grp.reels.sort((a, b) => Number(a.weight) - Number(b.weight)).slice(0, 6).map((r) => (
+                      <span key={r.id} style={{ background: "#f8f7f4", border: "1px solid #e8e2d8", borderRadius: 4, padding: "2px 6px", fontSize: 11, color: "#3a3a3a", fontWeight: 500 }}>
+                        {fmt(r.weight)}
+                      </span>
+                    ))}
+                    {grp.reels.length > 6 && <span style={{ fontSize: 11, color: "#9a9080" }}>+{grp.reels.length - 6} more</span>}
+                    <span style={{ fontSize: 11, color: "#9a9080", marginLeft: 4 }}>· {fmt(totalWtGrp)} kg</span>
                   </div>
                 )}
               </div>
@@ -896,7 +899,17 @@ function StockTab({ state, update }) {
 function SellTab({ state, update }) {
   const [customer, setCustomer] = useState("");
   const [date, setDate] = useState(today());
-  const [challanNo, setChallanNo] = useState("");
+
+  // Smart challan suggestion: find last used challan, parse numeric suffix, +1
+  const suggestedChallan = (() => {
+    const last = state.stock
+      .filter(r => r.sold && r.soldChallanNo && r.soldDate)
+      .sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate))[0]?.soldChallanNo || "";
+    if (!last) return "";
+    const m = last.match(/^(.*?)(\d+)$/);
+    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
+  })();
+  const [challanNo, setChallanNo] = useState(suggestedChallan);
   const [selected, setSelected] = useState([]);
   const [filter, setFilter] = useState({ bf: "", gsm: "", size: "" });
   const [done, setDone] = useState(null);
@@ -907,7 +920,7 @@ function SellTab({ state, update }) {
     if (filter.gsm && r.gsm !== filter.gsm) return false;
     if (filter.size && r.size !== filter.size) return false;
     return true;
-  });
+  }).sort((a, b) => Number(a.size) - Number(b.size) || Number(a.weight) - Number(b.weight));
   const selReels = state.stock.filter(r => selected.includes(r.id));
   const totalWt = selReels.reduce((s, r) => s + Number(r.weight), 0);
   const toggleReel = id => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
@@ -932,7 +945,7 @@ function SellTab({ state, update }) {
       <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
       <div className="serif" style={{ fontSize: 28 }}>Sale Recorded</div>
       <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} reels · {fmt(done.wt)} kg sold to {done.customer}</div>
-      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(""); }}>Record Another Sale</button>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); }}>Record Another Sale</button>
     </div>
   );
 
@@ -944,7 +957,10 @@ function SellTab({ state, update }) {
         <div className="g3">
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers || []} /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div><label className="lbl">Challan No (physical)</label><input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. CH-101" /></div>
+          <div>
+            <label className="lbl">Challan No (physical){suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. CH-101" />
+          </div>
         </div>
       </div>
       <div className="card">
@@ -971,28 +987,29 @@ function SellTab({ state, update }) {
         {filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: 28, color: "#b0a898" }}><span className="serif-italic">No available stock matching filter.</span></div>
         ) : (
-          <table>
-            <thead><tr><th style={{ width: 40 }}></th><th>Grade</th><th>Size</th><th>Weight</th><th>Supplier</th><th>Date In</th></tr></thead>
-            <tbody>
-              {filtered.map(r => {
-                const sel = selected.includes(r.id);
-                return (
-                  <tr key={r.id} onClick={() => toggleReel(r.id)} style={{ cursor: "pointer", background: sel ? "#fdf9f0" : undefined }}>
-                    <td>
-                      <div style={{ width: 18, height: 18, border: `2px solid ${sel ? "#8b6914" : "#ccc8c0"}`, borderRadius: 4, background: sel ? "#8b6914" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.1s" }}>
-                        {sel && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}
-                      </div>
-                    </td>
-                    <td><span className="tag">{r.bf} BF · {r.gsm} GSM</span></td>
-                    <td><span className="serif" style={{ fontSize: 20 }}>{r.size}"</span></td>
-                    <td style={{ fontWeight: 500 }}>{fmt(r.weight)} kg</td>
-                    <td style={{ fontSize: 12, color: "#9a9080" }}>{r.supplier}</td>
-                    <td style={{ fontSize: 12, color: "#9a9080" }}>{fmtDate(r.inwardDate)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0, border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+            {filtered.map((r, idx) => {
+              const sel = selected.includes(r.id);
+              return (
+                <div key={r.id} onClick={() => toggleReel(r.id)}
+                  style={{ cursor: "pointer", background: sel ? "#fdf9f0" : idx % 2 === 0 ? "#fff" : "#faf8f4", borderBottom: idx < filtered.length - 1 ? "1px solid #f3ede4" : "none", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, transition: "background 0.1s" }}>
+                  <div style={{ width: 20, height: 20, border: `2px solid ${sel ? "#8b6914" : "#ccc8c0"}`, borderRadius: 4, background: sel ? "#8b6914" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.1s" }}>
+                    {sel && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                      <span className="serif" style={{ fontSize: 22, lineHeight: 1, color: "#1a1a1a" }}>{r.size}"</span>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1a" }}>{fmt(r.weight)} kg</span>
+                      <span className="tag" style={{ fontSize: 10 }}>{r.bf} BF · {r.gsm} GSM</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9a9080" }}>
+                      {r.supplier}{r.inwardDate ? ` · ${fmtDate(r.inwardDate)}` : ""}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
       {selected.length > 0 && (
