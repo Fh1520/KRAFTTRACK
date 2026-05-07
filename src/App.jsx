@@ -133,6 +133,26 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
   );
 }
 
+// ─── KRAFT REEL LOGO ──────────────────────────────────────────────────────────
+function KraftReelIcon({ size = 30 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
+      <rect width="30" height="30" rx="7" fill="#1a1a1a"/>
+      {/* outer reel body */}
+      <circle cx="15" cy="15" r="10" fill="#7a4f1e"/>
+      {/* wound paper layers */}
+      <circle cx="15" cy="15" r="8.5" fill="none" stroke="#9b6a2e" strokeWidth="1.2"/>
+      <circle cx="15" cy="15" r="7" fill="none" stroke="#b07f3a" strokeWidth="1.2"/>
+      <circle cx="15" cy="15" r="5.5" fill="none" stroke="#9b6a2e" strokeWidth="1"/>
+      {/* core */}
+      <circle cx="15" cy="15" r="4" fill="#c49a45"/>
+      <circle cx="15" cy="15" r="2.2" fill="#1a1a1a"/>
+      {/* center hole shine */}
+      <circle cx="14.2" cy="14.2" r="0.6" fill="#3a3a3a"/>
+    </svg>
+  );
+}
+
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [state, setState] = useState(INITIAL_STATE);
@@ -247,6 +267,7 @@ export default function App() {
         @media(max-width:640px){
           .brand-text{display:none!important}
           .brand-divider{display:none!important}
+          .brand-mobile{display:flex!important}
           .nav-sync-text{display:none!important}
           .nav-inner{padding:0 8px!important}
           h1{font-size:26px!important}
@@ -255,15 +276,18 @@ export default function App() {
           .card-flat .card{padding:14px!important}
           .stat-num{font-size:32px!important}
         }
+        @media(min-width:641px){
+          .brand-mobile{display:none!important}
+        }
       `}</style>
 
       {/* Nav */}
       <nav style={{ background: "#fff", borderBottom: "1px solid #e8e2d8", position: "sticky", top: 0, zIndex: 200 }}>
         <div className="nav-inner" style={{ maxWidth: 980, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center" }}>
-          {/* Brand */}
+          {/* Brand — desktop */}
           <div className="brand-divider" style={{ padding: "11px 0", marginRight: 20, paddingRight: 20, borderRight: "1px solid #e8e2d8", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 30, height: 30, background: "#1a1a1a", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📦</div>
+              <KraftReelIcon size={30} />
               <div className="brand-text">
                 <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
                   <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, fontWeight: 500, letterSpacing: "-0.01em", color: "#1a1a1a" }}>SK Traders</span>
@@ -272,9 +296,10 @@ export default function App() {
               </div>
             </div>
           </div>
-          {/* On mobile: just the icon, no divider */}
-          <div style={{ display: "none" }} className="brand-mobile">
-            <div style={{ width: 28, height: 28, background: "#1a1a1a", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, marginRight: 8, flexShrink: 0 }}>📦</div>
+          {/* Brand — mobile: icon + SK Traders text */}
+          <div className="brand-mobile" style={{ display: "flex", alignItems: "center", gap: 7, paddingRight: 10, marginRight: 4, flexShrink: 0 }}>
+            <KraftReelIcon size={26} />
+            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 13, fontWeight: 500, color: "#1a1a1a", whiteSpace: "nowrap" }}>SK Traders</span>
           </div>
           <div style={{ display: "flex", overflowX: "auto", flex: 1, scrollbarWidth: "none" }}>
             {TABS.map(t => (
@@ -638,8 +663,12 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     if (!newReel.size || !newReel.weight) return;
     setReels(p => [...p, { ...newReel, id: genId() }]);
     setNewReel(r => ({ ...r, weight: "" }));
-    // Re-focus weight input so mobile keyboard stays open for rapid entry
-    setTimeout(() => weightInputRef.current?.focus(), 50);
+    // Re-focus + scroll input into view so keyboard stays up (mobile) and
+    // page doesn't jump away from the input (laptop)
+    setTimeout(() => {
+      weightInputRef.current?.focus();
+      weightInputRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
   };
 
   const submit = () => {
@@ -655,7 +684,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
   const totalWt = reels.reduce((s, r) => s + (Number(r.weight) || 0), 0);
 
   if (view === "add") return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 160 }} className="fade-in">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
         <div><div className="section-eyebrow">Inward</div><h2>Add Stock Entry</h2></div>
@@ -675,12 +704,16 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
           </div>
         </div>
       </div>
+      {/* Scrollable reel list — grows upward as items are added */}
       <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ marginBottom: 0 }}>Reels {reels.length > 0 && `— ${reels.length} reels, ${fmt(totalWt)} kg`}</h3>
-        </div>
+        <h3 style={{ marginBottom: reels.length ? 14 : 0 }}>
+          Reels Added {reels.length > 0 && `— ${reels.length} reels, ${fmt(totalWt)} kg`}
+        </h3>
+        {reels.length === 0 && (
+          <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>No reels yet — use the entry bar below to add.</div>
+        )}
         {Object.entries(bySizeMap).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, sr]) => (
-          <div key={sz} style={{ marginBottom: 16 }}>
+          <div key={sz} style={{ marginBottom: 14 }}>
             <div className="lbl" style={{ marginBottom: 8 }}>Size {sz}" — {sr.length} reels</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {sr.map((r, i) => (
@@ -694,40 +727,39 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
             </div>
           </div>
         ))}
-        <div className="sep" />
-        <div className="lbl" style={{ marginBottom: 8 }}>Add Reel</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 120 }}>
-            <label className="lbl">Size (inch)</label>
-            <select value={newReel.size} onChange={e => setNewReel(r => ({ ...r, size: e.target.value }))}>
-              <option value="">Select size</option>{SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
-            </select>
+      </div>
+
+      {/* ── STICKY ENTRY BAR — stays at bottom regardless of scroll ── */}
+      <div style={{ position: "sticky", bottom: 0, zIndex: 120, background: "#f8f7f4", padding: "10px 0 0 0" }}>
+        <div className="card" style={{ borderTop: "2px solid #e8e2d8", borderRadius: "14px 14px 14px 14px", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ flex: 1, minWidth: 110 }}>
+              <label className="lbl">Size</label>
+              <select value={newReel.size} onChange={e => setNewReel(r => ({ ...r, size: e.target.value }))}>
+                <option value="">Select</option>{SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 110 }}>
+              <label className="lbl">Weight (kg)</label>
+              <input
+                ref={weightInputRef}
+                type="number"
+                inputMode="numeric"
+                value={newReel.weight}
+                onChange={e => setNewReel(r => ({ ...r, weight: e.target.value }))}
+                placeholder="e.g. 274"
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addReel(); } }}
+              />
+            </div>
+            <button className="btn btn-outline" onMouseDown={e => e.preventDefault()} onClick={addReel} style={{ flexShrink: 0 }}>+ Add</button>
           </div>
-          <div style={{ flex: 1, minWidth: 120 }}>
-            <label className="lbl">Weight (kg)</label>
-            <input
-              ref={weightInputRef}
-              type="number"
-              inputMode="numeric"
-              value={newReel.weight}
-              onChange={e => setNewReel(r => ({ ...r, weight: e.target.value }))}
-              placeholder="e.g. 274"
-              onKeyDown={e => e.key === "Enter" && addReel()}
-            />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #f3ede4" }}>
+            <div style={{ fontSize: 13, color: "#8a8070" }}>
+              Total: <span className="serif" style={{ fontSize: 20, color: "#1a1a1a" }}>{fmt(totalWt)} kg</span>
+              <span style={{ fontSize: 11, color: "#b0a898", marginLeft: 6 }}>({reels.length} reels)</span>
+            </div>
+            <button className="btn btn-dark" onClick={submit} disabled={reels.length === 0 || !form.supplier}>✓ Save</button>
           </div>
-          <button
-            className="btn btn-outline"
-            onMouseDown={e => e.preventDefault()}
-            onClick={addReel}
-          >+ Add</button>
-        </div>
-        <div className="sep" />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 13, color: "#8a8070" }}>
-            Total: <span className="serif" style={{ fontSize: 22, color: "#1a1a1a" }}>{fmt(totalWt)} kg</span>
-            <span style={{ fontSize: 11, color: "#b0a898", marginLeft: 6 }}>({reels.length} reels · {(totalWt / 1000).toFixed(2)} tons)</span>
-          </div>
-          <button className="btn btn-dark" onClick={submit} disabled={reels.length === 0 || !form.supplier}>✓ Save to Stock</button>
         </div>
       </div>
     </div>
@@ -1040,6 +1072,7 @@ function HistoryTab({ state, update }) {
   const [filterMonth, setFilterMonth] = useState("");
   const [custView, setCustView] = useState("challans"); // "challans" | "customers" | "customerDetail"
   const [selCustomer, setSelCustomer] = useState("");
+  const [custSearch, setCustSearch] = useState("");
 
   const sold = state.stock.filter(r => r.sold);
   const challanMap = {};
@@ -1137,18 +1170,27 @@ function HistoryTab({ state, update }) {
 
   // ── CUSTOMER LIST VIEW ──
   if (custView === "customers") return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <button className="btn btn-outline btn-sm" onClick={() => setCustView("challans")}>← Back</button>
         <div><div className="section-eyebrow">Customers</div><h2>Customer History</h2></div>
       </div>
+      <input
+        value={custSearch}
+        onChange={e => setCustSearch(e.target.value)}
+        placeholder="Search customers…"
+        style={{ maxWidth: 360 }}
+      />
       {Object.keys(custStats).length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40 }}>
           <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No customers yet.</span>
         </div>
       ) : (
         <div className="card-flat">
-          {Object.entries(custStats).sort((a, b) => b[1].kg - a[1].kg).map(([name, cs], idx, arr) => {
+          {Object.entries(custStats)
+            .filter(([name]) => !custSearch || name.toLowerCase().includes(custSearch.toLowerCase()))
+            .sort((a, b) => b[1].kg - a[1].kg)
+            .map(([name, cs], idx, arr) => {
             const topSz = Object.entries(cs.sizes).sort((a, b) => b[1] - a[1])[0];
             return (
               <div key={name}
@@ -1175,6 +1217,9 @@ function HistoryTab({ state, update }) {
               </div>
             );
           })}
+          {custSearch && Object.entries(custStats).filter(([name]) => name.toLowerCase().includes(custSearch.toLowerCase())).length === 0 && (
+            <div style={{ padding: 28, textAlign: "center", fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>No customers match "{custSearch}"</div>
+          )}
         </div>
       )}
     </div>
@@ -1464,38 +1509,58 @@ function HistoryTab({ state, update }) {
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────────────────────
-function getWeekBounds(offset = 0) {
-  const now = new Date();
-  const dow = now.getDay();
-  const diff = dow === 0 ? -6 : 1 - dow;
-  const mon = new Date(now); mon.setDate(now.getDate() + diff + offset * 7); mon.setHours(0, 0, 0, 0);
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6); sun.setHours(23, 59, 59, 999);
+function toISOWeek(date) {
+  const d = new Date(date); d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const w1 = new Date(d.getFullYear(), 0, 4);
+  return `${d.getFullYear()}-W${String(1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7)).padStart(2,"0")}`;
+}
+function weekToRange(ws) {
+  if (!ws || !ws.includes("-W")) return [new Date(), new Date()];
+  const [yr, wk] = ws.split("-W");
+  const jan4 = new Date(Number(yr), 0, 4);
+  const w1Mon = new Date(jan4); w1Mon.setDate(jan4.getDate() - (jan4.getDay() + 6) % 7);
+  const mon = new Date(w1Mon); mon.setDate(w1Mon.getDate() + (Number(wk)-1)*7); mon.setHours(0,0,0,0);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
   return [mon, sun];
 }
-function filterByPeriod(sold, period) {
-  if (!period) return sold;
-  if (period === "today") {
-    const s = new Date(); s.setHours(0, 0, 0, 0);
-    const e = new Date(); e.setHours(23, 59, 59, 999);
-    return sold.filter(r => { const d = new Date(r.soldDate); return d >= s && d <= e; });
-  }
-  if (period === "week") { const [s, e] = getWeekBounds(0); return sold.filter(r => { const d = new Date(r.soldDate); return d >= s && d <= e; }); }
-  if (period === "lastweek") { const [s, e] = getWeekBounds(-1); return sold.filter(r => { const d = new Date(r.soldDate); return d >= s && d <= e; }); }
-  return sold.filter(r => monthKey(r.soldDate) === period);
-}
-function periodLabel(period) {
-  if (!period) return "All Time";
-  if (period === "today") return "Today";
-  if (period === "week") return "This Week";
-  if (period === "lastweek") return "Last Week";
-  return monthLabel(period);
+function fmtWeekLabel(ws) {
+  if (!ws || !ws.includes("-W")) return ws;
+  const [mon, sun] = weekToRange(ws);
+  return `${mon.toLocaleDateString("en-IN",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}`;
 }
 
 function ReportsTab({ state }) {
   const sold = state.stock.filter(r => r.sold && r.soldDate);
+  const [periodMode, setPeriodMode] = useState("month"); // "day" | "week" | "month" | "all"
+  const [selDate,  setSelDate]  = useState(today());
+  const [selWeek,  setSelWeek]  = useState(toISOWeek(new Date()));
+  const [selMonth, setSelMonth] = useState(() => {
+    const months = [...new Set(sold.map(r => monthKey(r.soldDate)).filter(Boolean))].sort().reverse();
+    return months[0] || today().slice(0, 7);
+  });
+
+  const periodSold = (() => {
+    if (periodMode === "all") return sold;
+    if (periodMode === "day") {
+      return sold.filter(r => r.soldDate === selDate);
+    }
+    if (periodMode === "week") {
+      const [mon, sun] = weekToRange(selWeek);
+      return sold.filter(r => { const d = new Date(r.soldDate); return d >= mon && d <= sun; });
+    }
+    if (periodMode === "month") return sold.filter(r => monthKey(r.soldDate) === selMonth);
+    return sold;
+  })();
+
+  const periodLabelStr = (() => {
+    if (periodMode === "all") return "All Time";
+    if (periodMode === "day") return fmtDate(selDate);
+    if (periodMode === "week") return fmtWeekLabel(selWeek);
+    if (periodMode === "month") return monthLabel(selMonth);
+  })();
+
   const allMonths = [...new Set(sold.map(r => monthKey(r.soldDate)))].sort().reverse();
-  const [selPeriod, setSelPeriod] = useState(allMonths[0] || "");
-  const periodSold = filterByPeriod(sold, selPeriod);
   const totalReels = periodSold.length;
   const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
   const totalTons = totalKg / 1000;
@@ -1517,7 +1582,7 @@ function ReportsTab({ state }) {
   const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0) }));
   const avgWeight = totalReels > 0 ? (totalKg / totalReels).toFixed(0) : 0;
   const topSize = topSizes[0]?.[0] || "—";
-  const isShortPeriod = ["today", "week", "lastweek"].includes(selPeriod);
+  const showTrend = periodMode === "all" || periodMode === "month";
 
   if (sold.length === 0) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
@@ -1532,17 +1597,24 @@ function ReportsTab({ state }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }} className="fade-in">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <label className="lbl" style={{ marginBottom: 0 }}>Period</label>
-          <select value={selPeriod} onChange={e => setSelPeriod(e.target.value)} style={{ width: "auto", padding: "7px 12px" }}>
-            <option value="today">Today</option>
-            <option value="week">This Week</option>
-            <option value="lastweek">Last Week</option>
-            <option value="">All Time</option>
-            {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-          </select>
+        <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10, minWidth: 260 }}>
+          {/* Mode tabs */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {[["day","Day"],["week","Week"],["month","Month"],["all","All Time"]].map(([m, label]) => (
+              <button key={m} onClick={() => setPeriodMode(m)}
+                style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1.5px solid ${periodMode === m ? "#1a1a1a" : "#ddd8ce"}`, background: periodMode === m ? "#1a1a1a" : "transparent", color: periodMode === m ? "#fff" : "#6a6050", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {/* Value picker */}
+          {periodMode === "day"   && <input type="date"  value={selDate}  onChange={e => setSelDate(e.target.value)}  style={{ width: "100%" }} />}
+          {periodMode === "week"  && <input type="week"  value={selWeek}  onChange={e => setSelWeek(e.target.value)}  style={{ width: "100%" }} />}
+          {periodMode === "month" && <input type="month" value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ width: "100%" }} />}
+          {periodMode === "all"   && <div style={{ fontSize: 12, color: "#9a9080", paddingTop: 2 }}>Showing all recorded sales</div>}
+          <div style={{ fontSize: 11, color: "#8b6914", fontWeight: 500 }}>{periodLabelStr}</div>
         </div>
       </div>
       <div className="g4">
@@ -1559,7 +1631,7 @@ function ReportsTab({ state }) {
           </div>
         ))}
       </div>
-      {!isShortPeriod && trendData.length > 1 && (
+      {showTrend && trendData.length > 1 && (
         <div className="card">
           <h3>Monthly Sales Trend — Weight Dispatched</h3>
           <BarChart data={trendData} color="#8b6914" unit="t" height={110} />
@@ -1634,7 +1706,7 @@ function ReportsTab({ state }) {
         </div>
       </div>
       <div className="card" style={{ background: "#1a1a1a", color: "#f8f7f4", border: "none" }}>
-        <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabel(selPeriod)}</h3>
+        <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabelStr}</h3>
         <div className="g3">
           {[
             { label: "Top Size", val: topSize + '"', sub: "most reels sold" },
