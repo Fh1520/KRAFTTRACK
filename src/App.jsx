@@ -137,10 +137,10 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
 export default function App() {
   const [state, setState] = useState(INITIAL_STATE);
   const [tab, setTab] = useState("Home");
+  const [stockNav, setStockNav] = useState(null);
   const [syncing, setSyncing] = useState(true);
   const [lastSaved, setLastSaved] = useState(null);
   const [saveError, setSaveError] = useState(false);
-  const [lowPopup, setLowPopup] = useState(null);
   const saveTimer = useRef(null);
   const isRemoteUpdate = useRef(false);
 
@@ -188,10 +188,6 @@ export default function App() {
   });
   const lowItems = Object.values(sizeCountMap).filter(x => x.count <= 2).sort((a, b) => Number(a.size) - Number(b.size));
   const moderateItems = Object.values(sizeCountMap).filter(x => x.count === 3).sort((a, b) => Number(a.size) - Number(b.size));
-
-  useEffect(() => {
-    if (moderateItems.length > 0 && !lowPopup) setLowPopup(moderateItems);
-  }, [moderateItems.length]);
 
   return (
     <div style={{ fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", background: "#f8f7f4", minHeight: "100vh", color: "#1a1a1a" }}>
@@ -261,31 +257,6 @@ export default function App() {
         }
       `}</style>
 
-      {/* Moderate stock popup */}
-      {lowPopup && (
-        <div className="modal-bg" onClick={() => setLowPopup(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <span style={{ fontSize: 22 }}>📦</span>
-              <div>
-                <div className="serif" style={{ fontSize: 20 }}>Stock Running Low</div>
-                <div style={{ fontSize: 12, color: "#9a9080", marginTop: 2 }}>Moderate warning — 3 reels remaining</div>
-              </div>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
-              {lowPopup.map(item => (
-                <div key={`${item.size}${item.bf}`} style={{ background: "#f4f8ff", border: "1px solid #b5c8e8", borderRadius: 8, padding: "8px 14px" }}>
-                  <div className="serif" style={{ fontSize: 20, color: "#2a4a7a" }}>{item.size}"</div>
-                  <div style={{ fontSize: 10, color: "#8a8070", marginTop: 2 }}>{item.bf} BF · {item.gsm} GSM · 3 reels left</div>
-                </div>
-              ))}
-            </div>
-            <p style={{ fontSize: 13, color: "#6a6050", marginBottom: 20, lineHeight: 1.6 }}>These sizes have only 3 reels remaining. Consider adding them to your next order.</p>
-            <button className="btn btn-dark" style={{ width: "100%", justifyContent: "center" }} onClick={() => setLowPopup(null)}>Understood</button>
-          </div>
-        </div>
-      )}
-
       {/* Nav */}
       <nav style={{ background: "#fff", borderBottom: "1px solid #e8e2d8", position: "sticky", top: 0, zIndex: 200 }}>
         <div className="nav-inner" style={{ maxWidth: 980, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center" }}>
@@ -331,8 +302,8 @@ export default function App() {
       </nav>
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in">
-        {tab === "Home"     && <HomeTab     state={state} setTab={setTab} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} />}
-        {tab === "Stock"    && <StockTab    state={state} update={update} />}
+        {tab === "Home"     && <HomeTab     state={state} setTab={setTab} setStockNav={setStockNav} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} />}
+        {tab === "Stock"    && <StockTab    state={state} update={update} stockNav={stockNav} clearStockNav={() => setStockNav(null)} />}
         {tab === "Sell"     && <SellTab     state={state} update={update} />}
         {tab === "History"  && <HistoryTab  state={state} update={update} />}
         {tab === "Reports"  && <ReportsTab  state={state} />}
@@ -343,7 +314,7 @@ export default function App() {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeTab({ state, setTab, lowItems, moderateItems, totalKg, available }) {
+function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available }) {
   const sold = state.stock.filter(r => r.sold);
   const bySpec = {};
   available.forEach(r => {
@@ -429,7 +400,11 @@ function HomeTab({ state, setTab, lowItems, moderateItems, totalKg, available })
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {Object.entries(spec.sizes).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, cnt]) => (
-              <div key={sz} style={{ background: cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f8f7f4", border: `1px solid ${cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#b5c8e8" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68 }}>
+              <div key={sz}
+                onClick={() => { setTab("Stock"); setStockNav({ size: sz }); }}
+                style={{ background: cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f8f7f4", border: `1px solid ${cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#b5c8e8" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s, box-shadow 0.1s" }}
+                onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.05)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.10)"; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}>
                 <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: cnt <= 2 ? "#a05800" : cnt === 3 ? "#2a4a7a" : "#1a1a1a" }}>{sz}"</div>
                 <div style={{ fontSize: 10, color: "#9a9080", marginTop: 4 }}>{cnt} reel{cnt !== 1 ? "s" : ""}</div>
               </div>
@@ -642,18 +617,29 @@ function SizeOutwardHistory({ sz, challanList }) {
 }
 
 // ─── STOCK (INWARD) ───────────────────────────────────────────────────────────
-function StockTab({ state, update }) {
+function StockTab({ state, update, stockNav, clearStockNav }) {
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState({ bf: "", gsm: "", shade: "", size: "", showSold: false });
+
+  useEffect(() => {
+    if (stockNav?.size) {
+      setFilter(f => ({ ...f, size: stockNav.size }));
+      setView("size");
+      clearStockNav();
+    }
+  }, [stockNav]);
   const [form, setForm] = useState({ supplier: "", invoiceNo: "", date: today(), bf: state.grades[0]?.bf || "18", gsm: state.grades[0]?.gsm || "150", shade: state.grades[0]?.shade || "golden" });
   const [reels, setReels] = useState([]);
   const [newReel, setNewReel] = useState({ size: "", weight: "" });
   const [saved, setSaved] = useState(false);
+  const weightInputRef = useRef(null);
 
   const addReel = () => {
     if (!newReel.size || !newReel.weight) return;
     setReels(p => [...p, { ...newReel, id: genId() }]);
     setNewReel(r => ({ ...r, weight: "" }));
+    // Re-focus weight input so mobile keyboard stays open for rapid entry
+    setTimeout(() => weightInputRef.current?.focus(), 50);
   };
 
   const submit = () => {
@@ -719,9 +705,21 @@ function StockTab({ state, update }) {
           </div>
           <div style={{ flex: 1, minWidth: 120 }}>
             <label className="lbl">Weight (kg)</label>
-            <input type="number" value={newReel.weight} onChange={e => setNewReel(r => ({ ...r, weight: e.target.value }))} placeholder="e.g. 274" onKeyDown={e => e.key === "Enter" && addReel()} />
+            <input
+              ref={weightInputRef}
+              type="number"
+              inputMode="numeric"
+              value={newReel.weight}
+              onChange={e => setNewReel(r => ({ ...r, weight: e.target.value }))}
+              placeholder="e.g. 274"
+              onKeyDown={e => e.key === "Enter" && addReel()}
+            />
           </div>
-          <button className="btn btn-outline" onClick={addReel}>+ Add</button>
+          <button
+            className="btn btn-outline"
+            onMouseDown={e => e.preventDefault()}
+            onClick={addReel}
+          >+ Add</button>
         </div>
         <div className="sep" />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1032,10 +1030,16 @@ function SellTab({ state, update }) {
 function HistoryTab({ state, update }) {
   const [search, setSearch] = useState("");
   const [openChallan, setOpenChallan] = useState(null);
-  const [editingChallan, setEditingChallan] = useState(null); // key of challan being edited
+  const [editingChallan, setEditingChallan] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [confirmDeleteChallan, setConfirmDeleteChallan] = useState(null);
   const [addReelFilter, setAddReelFilter] = useState({ bf: "", gsm: "", size: "" });
+  const [filterCustomer, setFilterCustomer] = useState("");
+  const [filterSize, setFilterSize] = useState("");
+  const [filterGrade, setFilterGrade] = useState("");
+  const [filterMonth, setFilterMonth] = useState("");
+  const [custView, setCustView] = useState("challans"); // "challans" | "customers" | "customerDetail"
+  const [selCustomer, setSelCustomer] = useState("");
 
   const sold = state.stock.filter(r => r.sold);
   const challanMap = {};
@@ -1044,13 +1048,31 @@ function HistoryTab({ state, update }) {
     if (!challanMap[key]) {
       challanMap[key] = { challanNo: r.soldChallanNo || null, date: r.soldDate, customer: r.soldTo || "", reels: [] };
     } else if (!challanMap[key].customer && r.soldTo) {
-      // recover customer name from another reel in the same challan if first was blank
       challanMap[key].customer = r.soldTo;
     }
     challanMap[key].reels.push(r);
   });
 
+  const allChallanCustomers = [...new Set(Object.values(challanMap).map(c => c.customer).filter(Boolean))].sort();
+  const allChallanMonths = [...new Set(Object.values(challanMap).map(c => monthKey(c.date)).filter(Boolean))].sort().reverse();
+
+  // Per-customer aggregate stats
+  const custStats = {};
+  Object.values(challanMap).forEach(ch => {
+    const c = ch.customer || "Unknown";
+    if (!custStats[c]) custStats[c] = { reels: 0, kg: 0, challans: 0, lastDate: "", sizes: {} };
+    custStats[c].challans++;
+    custStats[c].reels += ch.reels.length;
+    custStats[c].kg += ch.reels.reduce((s, r) => s + Number(r.weight), 0);
+    if (!custStats[c].lastDate || ch.date > custStats[c].lastDate) custStats[c].lastDate = ch.date;
+    ch.reels.forEach(r => { custStats[c].sizes[r.size] = (custStats[c].sizes[r.size] || 0) + 1; });
+  });
+
   let challans = Object.values(challanMap).sort((a, b) => new Date(a.date) - new Date(b.date));
+  if (filterCustomer) challans = challans.filter(c => c.customer === filterCustomer);
+  if (filterSize) challans = challans.filter(c => c.reels.some(r => r.size === filterSize));
+  if (filterGrade) { const [bf, gsm] = filterGrade.split("|"); challans = challans.filter(c => c.reels.some(r => r.bf === bf && r.gsm === gsm)); }
+  if (filterMonth) challans = challans.filter(c => monthKey(c.date) === filterMonth);
   if (search) {
     const q = search.toLowerCase();
     challans = challans.filter(c =>
@@ -1060,6 +1082,7 @@ function HistoryTab({ state, update }) {
       c.reels.some(r => r.size?.includes(q))
     );
   }
+  const hasFilters = filterCustomer || filterSize || filterGrade || filterMonth || search;
 
   const startEditChallan = (ch, key) => {
     setEditingChallan(key);
@@ -1112,16 +1135,121 @@ function HistoryTab({ state, update }) {
     setOpenChallan(null);
   };
 
-  return (
+  // ── CUSTOMER LIST VIEW ──
+  if (custView === "customers") return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
-      <div><div className="section-eyebrow">Records</div><h2>Sales History</h2></div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by customer, challan no, size…" style={{ maxWidth: 360 }} />
-        <span style={{ fontSize: 12, color: "#9a9080" }}>{challans.length} challan{challans.length !== 1 ? "s" : ""}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="btn btn-outline btn-sm" onClick={() => setCustView("challans")}>← Back</button>
+        <div><div className="section-eyebrow">Customers</div><h2>Customer History</h2></div>
+      </div>
+      {Object.keys(custStats).length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No customers yet.</span>
+        </div>
+      ) : (
+        <div className="card-flat">
+          {Object.entries(custStats).sort((a, b) => b[1].kg - a[1].kg).map(([name, cs], idx, arr) => {
+            const topSz = Object.entries(cs.sizes).sort((a, b) => b[1] - a[1])[0];
+            return (
+              <div key={name}
+                onClick={() => { setSelCustomer(name); setCustView("customerDetail"); setFilterCustomer(name); setSearch(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); }}
+                style={{ padding: "14px 18px", borderBottom: idx < arr.length - 1 ? "1px solid #f3ede4" : "none", cursor: "pointer", transition: "background 0.12s" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 34, height: 34, background: CHART_COLORS[idx % CHART_COLORS.length], borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+                    {name.charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>
+                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels · {fmt(Math.round(cs.kg))} kg{topSz ? ` · Top: ${topSz[0]}"` : ""}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{(cs.kg / 1000).toFixed(2)} t</div>
+                    <div style={{ fontSize: 10, color: "#b0a898", marginTop: 2 }}>Last: {fmtDate(cs.lastDate)}</div>
+                  </div>
+                  <div style={{ color: "#c8b89a", fontSize: 16 }}>›</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const isCustomerDetail = custView === "customerDetail";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+      {isCustomerDetail ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button className="btn btn-outline btn-sm" onClick={() => { setCustView("customers"); setSelCustomer(""); setFilterCustomer(""); }}>← Customers</button>
+            <div><div className="section-eyebrow">Customer Detail</div><h2>{selCustomer}</h2></div>
+          </div>
+          {custStats[selCustomer] && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#6a6050", paddingLeft: 2 }}>
+              <span>📦 {custStats[selCustomer].challans} challans</span>
+              <span>🧻 {custStats[selCustomer].reels} reels</span>
+              <span>⚖️ {fmt(Math.round(custStats[selCustomer].kg))} kg ({(custStats[selCustomer].kg/1000).toFixed(2)} t)</span>
+              <span>🗓 Last: {fmtDate(custStats[selCustomer].lastDate)}</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div><div className="section-eyebrow">Records</div><h2>Sales History</h2></div>
+          <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>👥 Customers</button>
+        </div>
+      )}
+      {/* Filter bar */}
+      <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ flex: 2, minWidth: 160 }}>
+            <label className="lbl">Customer</label>
+            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}>
+              <option value="">All Customers</option>
+              {allChallanCustomers.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 120 }}>
+            <label className="lbl">Grade</label>
+            <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)}>
+              <option value="">All</option>
+              {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 100 }}>
+            <label className="lbl">Size</label>
+            <select value={filterSize} onChange={e => setFilterSize(e.target.value)}>
+              <option value="">All</option>
+              {SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 110 }}>
+            <label className="lbl">Month</label>
+            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+              <option value="">All Time</option>
+              {allChallanMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, challan no, size…" style={{ flex: 1 }} />
+          {hasFilters && (
+            <button className="btn btn-outline btn-sm" onClick={() => { setFilterCustomer(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); setSearch(""); }}>
+              Clear
+            </button>
+          )}
+          <span style={{ fontSize: 12, color: "#9a9080", whiteSpace: "nowrap" }}>{challans.length} challan{challans.length !== 1 ? "s" : ""}</span>
+        </div>
       </div>
       {challans.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40 }}>
-          <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>{sold.length === 0 ? "No sales recorded yet." : "No results match your search."}</span>
+          <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>{sold.length === 0 ? "No sales recorded yet." : "No results match your filters."}</span>
         </div>
       ) : (
         <div className="card-flat">
@@ -1336,21 +1464,48 @@ function HistoryTab({ state, update }) {
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────────────────────
+function getWeekBounds(offset = 0) {
+  const now = new Date();
+  const dow = now.getDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
+  const mon = new Date(now); mon.setDate(now.getDate() + diff + offset * 7); mon.setHours(0, 0, 0, 0);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6); sun.setHours(23, 59, 59, 999);
+  return [mon, sun];
+}
+function filterByPeriod(sold, period) {
+  if (!period) return sold;
+  if (period === "today") {
+    const s = new Date(); s.setHours(0, 0, 0, 0);
+    const e = new Date(); e.setHours(23, 59, 59, 999);
+    return sold.filter(r => { const d = new Date(r.soldDate); return d >= s && d <= e; });
+  }
+  if (period === "week") { const [s, e] = getWeekBounds(0); return sold.filter(r => { const d = new Date(r.soldDate); return d >= s && d <= e; }); }
+  if (period === "lastweek") { const [s, e] = getWeekBounds(-1); return sold.filter(r => { const d = new Date(r.soldDate); return d >= s && d <= e; }); }
+  return sold.filter(r => monthKey(r.soldDate) === period);
+}
+function periodLabel(period) {
+  if (!period) return "All Time";
+  if (period === "today") return "Today";
+  if (period === "week") return "This Week";
+  if (period === "lastweek") return "Last Week";
+  return monthLabel(period);
+}
+
 function ReportsTab({ state }) {
   const sold = state.stock.filter(r => r.sold && r.soldDate);
   const allMonths = [...new Set(sold.map(r => monthKey(r.soldDate)))].sort().reverse();
-  const [selMonth, setSelMonth] = useState(allMonths[0] || "");
-  const monthSold = selMonth ? sold.filter(r => monthKey(r.soldDate) === selMonth) : sold;
-  const totalReels = monthSold.length;
-  const totalKg = monthSold.reduce((s, r) => s + Number(r.weight), 0);
+  const [selPeriod, setSelPeriod] = useState(allMonths[0] || "");
+  const periodSold = filterByPeriod(sold, selPeriod);
+  const totalReels = periodSold.length;
+  const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
   const totalTons = totalKg / 1000;
   const gradeMap = {};
-  monthSold.forEach(r => { const k = `${r.bf} BF ${r.gsm} GSM`; if (!gradeMap[k]) gradeMap[k] = { reels: 0, kg: 0 }; gradeMap[k].reels++; gradeMap[k].kg += Number(r.weight); });
+  periodSold.forEach(r => { const k = `${r.bf} BF ${r.gsm} GSM`; if (!gradeMap[k]) gradeMap[k] = { reels: 0, kg: 0 }; gradeMap[k].reels++; gradeMap[k].kg += Number(r.weight); });
   const sizeMap = {};
-  monthSold.forEach(r => { sizeMap[r.size] = (sizeMap[r.size] || 0) + 1; });
+  periodSold.forEach(r => { sizeMap[r.size] = (sizeMap[r.size] || 0) + 1; });
   const topSizes = Object.entries(sizeMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const custMap = {};
-  monthSold.forEach(r => {
+  periodSold.forEach(r => {
     const c = r.soldTo || "Unknown";
     if (!custMap[c]) custMap[c] = { reels: 0, kg: 0, sizes: {}, grades: {} };
     custMap[c].reels++; custMap[c].kg += Number(r.weight);
@@ -1362,6 +1517,7 @@ function ReportsTab({ state }) {
   const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0) }));
   const avgWeight = totalReels > 0 ? (totalKg / totalReels).toFixed(0) : 0;
   const topSize = topSizes[0]?.[0] || "—";
+  const isShortPeriod = ["today", "week", "lastweek"].includes(selPeriod);
 
   if (sold.length === 0) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
@@ -1380,7 +1536,10 @@ function ReportsTab({ state }) {
         <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <label className="lbl" style={{ marginBottom: 0 }}>Period</label>
-          <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ width: "auto", padding: "7px 12px" }}>
+          <select value={selPeriod} onChange={e => setSelPeriod(e.target.value)} style={{ width: "auto", padding: "7px 12px" }}>
+            <option value="today">Today</option>
+            <option value="week">This Week</option>
+            <option value="lastweek">Last Week</option>
             <option value="">All Time</option>
             {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
           </select>
@@ -1400,7 +1559,7 @@ function ReportsTab({ state }) {
           </div>
         ))}
       </div>
-      {trendData.length > 1 && (
+      {!isShortPeriod && trendData.length > 1 && (
         <div className="card">
           <h3>Monthly Sales Trend — Weight Dispatched</h3>
           <BarChart data={trendData} color="#8b6914" unit="t" height={110} />
@@ -1475,7 +1634,7 @@ function ReportsTab({ state }) {
         </div>
       </div>
       <div className="card" style={{ background: "#1a1a1a", color: "#f8f7f4", border: "none" }}>
-        <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {selMonth ? monthLabel(selMonth) : "All Time"}</h3>
+        <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabel(selPeriod)}</h3>
         <div className="g3">
           {[
             { label: "Top Size", val: topSize + '"', sub: "most reels sold" },
