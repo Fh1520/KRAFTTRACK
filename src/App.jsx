@@ -201,9 +201,13 @@ export default function App() {
   const totalKg = available.reduce((s, r) => s + Number(r.weight), 0);
 
   const sizeCountMap = {};
-  available.forEach(r => {
+  // Seed from ALL stock first so fully sold-out sizes appear with count=0
+  state.stock.forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
     if (!sizeCountMap[k]) sizeCountMap[k] = { count: 0, bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size };
+  });
+  available.forEach(r => {
+    const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
     sizeCountMap[k].count++;
   });
   const lowItems = Object.values(sizeCountMap).filter(x => x.count <= 2).sort((a, b) => Number(a.size) - Number(b.size));
@@ -342,11 +346,16 @@ export default function App() {
 function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available }) {
   const sold = state.stock.filter(r => r.sold);
   const bySpec = {};
-  available.forEach(r => {
+  // Seed all known grade+size combos so sold-out sizes show as 0
+  state.stock.forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
     if (!bySpec[k]) bySpec[k] = { bf: r.bf, gsm: r.gsm, shade: r.shade, reels: 0, kg: 0, sizes: {} };
+    if (bySpec[k].sizes[r.size] === undefined) bySpec[k].sizes[r.size] = 0;
+  });
+  available.forEach(r => {
+    const k = `${r.bf}|${r.gsm}|${r.shade}`;
     bySpec[k].reels++; bySpec[k].kg += Number(r.weight);
-    bySpec[k].sizes[r.size] = (bySpec[k].sizes[r.size] || 0) + 1;
+    bySpec[k].sizes[r.size]++;
   });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -427,11 +436,11 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
             {Object.entries(spec.sizes).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, cnt]) => (
               <div key={sz}
                 onClick={() => { setTab("Stock"); setStockNav({ size: sz }); }}
-                style={{ background: cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f8f7f4", border: `1px solid ${cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#b5c8e8" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s, box-shadow 0.1s" }}
+                style={{ background: cnt === 0 ? "#fef0ee" : cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f8f7f4", border: `1px solid ${cnt === 0 ? "#f0c0ba" : cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#b5c8e8" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s, box-shadow 0.1s" }}
                 onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.05)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.10)"; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}>
-                <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: cnt <= 2 ? "#a05800" : cnt === 3 ? "#2a4a7a" : "#1a1a1a" }}>{sz}"</div>
-                <div style={{ fontSize: 10, color: "#9a9080", marginTop: 4 }}>{cnt} reel{cnt !== 1 ? "s" : ""}</div>
+                <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: cnt === 0 ? "#b83020" : cnt <= 2 ? "#a05800" : cnt === 3 ? "#2a4a7a" : "#1a1a1a" }}>{sz}"</div>
+                <div style={{ fontSize: 10, color: cnt === 0 ? "#c07060" : "#9a9080", marginTop: 4 }}>{cnt === 0 ? "out of stock" : `${cnt} reel${cnt !== 1 ? "s" : ""}`}</div>
               </div>
             ))}
           </div>
@@ -712,21 +721,27 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
         {reels.length === 0 && (
           <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>No reels yet — use the entry bar below to add.</div>
         )}
-        {Object.entries(bySizeMap).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, sr]) => (
-          <div key={sz} style={{ marginBottom: 14 }}>
-            <div className="lbl" style={{ marginBottom: 8 }}>Size {sz}" — {sr.length} reels</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {sr.map((r, i) => (
-                <div key={r.id} style={{ background: "#f8f7f4", border: "1px solid #e8e2d8", borderRadius: 8, padding: "7px 10px", display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 10, color: "#b0a898", minWidth: 18 }}>#{i + 1}</span>
-                  <input type="number" value={r.weight} onChange={e => setReels(p => p.map(x => x.id === r.id ? { ...x, weight: e.target.value } : x))} style={{ width: 72, padding: "4px 8px", fontSize: 12 }} />
-                  <span style={{ fontSize: 10, color: "#b0a898" }}>kg</span>
-                  <button style={{ background: "transparent", color: "#c0392b", border: "1px solid #f0c0ba", borderRadius: 4, padding: "2px 6px", fontSize: 10 }} onClick={() => setReels(p => p.filter(x => x.id !== r.id))}>✕</button>
-                </div>
-              ))}
+        {Object.entries(bySizeMap).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, sr]) => {
+          const sizeTotal = sr.reduce((s, r) => s + (Number(r.weight) || 0), 0);
+          return (
+            <div key={sz} style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div className="lbl" style={{ marginBottom: 0 }}>Size {sz}" — {sr.length} reel{sr.length !== 1 ? "s" : ""}</div>
+                {sizeTotal > 0 && <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 600 }}>{fmt(sizeTotal)} kg total</span>}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {sr.map((r, i) => (
+                  <div key={r.id} style={{ background: "#f8f7f4", border: "1px solid #e8e2d8", borderRadius: 8, padding: "7px 10px", display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 10, color: "#b0a898", minWidth: 18 }}>#{i + 1}</span>
+                    <input type="number" value={r.weight} onChange={e => setReels(p => p.map(x => x.id === r.id ? { ...x, weight: e.target.value } : x))} style={{ width: 72, padding: "4px 8px", fontSize: 12 }} />
+                    <span style={{ fontSize: 10, color: "#b0a898" }}>kg</span>
+                    <button style={{ background: "transparent", color: "#c0392b", border: "1px solid #f0c0ba", borderRadius: 4, padding: "2px 6px", fontSize: 10 }} onClick={() => setReels(p => p.filter(x => x.id !== r.id))}>✕</button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ── STICKY ENTRY BAR — stays at bottom regardless of scroll ── */}
@@ -817,6 +832,102 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     );
   }
 
+  // ── INWARD HISTORY VIEW ──
+  if (view === "inward") {
+    const shipments = {};
+    state.stock.forEach(r => {
+      const key = r.invoiceNo ? r.invoiceNo : `__${r.inwardDate}__${r.supplier}`;
+      if (!shipments[key]) shipments[key] = { invoiceNo: r.invoiceNo || null, date: r.inwardDate, supplier: r.supplier || "Unknown", reels: [] };
+      shipments[key].reels.push(r);
+    });
+    const shipList = Object.values(shipments).sort((a, b) => new Date(b.date) - new Date(a.date));
+    const [openShip, setOpenShip] = useState(null);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
+          <div><div className="section-eyebrow">Inward</div><h2>Inward History</h2></div>
+        </div>
+        {shipList.length === 0 ? (
+          <div className="card" style={{ textAlign: "center", padding: 40 }}>
+            <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No inward entries yet.</span>
+          </div>
+        ) : (
+          <div className="card-flat">
+            {shipList.map((sh, idx) => {
+              const key = sh.invoiceNo || `__${sh.date}__${sh.supplier}`;
+              const isOpen = openShip === key;
+              const totalWt = sh.reels.reduce((s, r) => s + Number(r.weight), 0);
+              const availCount = sh.reels.filter(r => !r.sold).length;
+              const bySizeInShip = {};
+              sh.reels.forEach(r => {
+                if (!bySizeInShip[r.size]) bySizeInShip[r.size] = [];
+                bySizeInShip[r.size].push(r);
+              });
+              return (
+                <div key={key} style={{ borderBottom: idx < shipList.length - 1 ? "1px solid #f3ede4" : "none" }}>
+                  <div onClick={() => setOpenShip(p => p === key ? null : key)}
+                    style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
+                    onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = "#faf8f4"; }}
+                    onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1a" }}>{sh.supplier}</span>
+                        <span className="tag tag-green" style={{ fontSize: 10 }}>{sh.reels.length} reels</span>
+                        {availCount < sh.reels.length && <span className="tag tag-red" style={{ fontSize: 10 }}>{sh.reels.length - availCount} sold</span>}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#9a9080", fontWeight: 500 }}>{fmtDate(sh.date)}</span>
+                        {sh.invoiceNo && <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#9a9080" }}>{sh.invoiceNo}</span></>}
+                        <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
+                        <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
+                        {Object.keys(bySizeInShip).sort((a, b) => Number(a) - Number(b)).slice(0, 4).map(sz => (
+                          <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}"</span>
+                        ))}
+                        {Object.keys(bySizeInShip).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInShip).length - 4}</span>}
+                      </div>
+                    </div>
+                    <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ background: "#faf8f4", borderTop: "1px solid #f0ebe0", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                      {Object.entries(bySizeInShip).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => {
+                        const szTotal = reels.reduce((s, r) => s + Number(r.weight), 0);
+                        return (
+                          <div key={sz}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span className="serif" style={{ fontSize: 20 }}>{sz}"</span>
+                                <span className="tag" style={{ fontSize: 10 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
+                                <span style={{ fontSize: 11, color: "#9a9080" }}>{reels.length} reel{reels.length !== 1 ? "s" : ""}</span>
+                              </div>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6050" }}>{fmt(Math.round(szTotal))} kg</span>
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                              {reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r, i) => (
+                                <span key={r.id} style={{ background: r.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "3px 9px", fontSize: 12, color: r.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
+                                  {fmt(r.weight)} kg{r.sold ? " · sold" : ""}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ borderTop: "1px solid #e8e2d8", paddingTop: 10, display: "flex", justifyContent: "flex-end", gap: 20, fontSize: 12 }}>
+                        <span style={{ color: "#9a9080" }}>{sh.reels.length} reels · {availCount} available</span>
+                        <span style={{ fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg total</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ── LIST VIEW ──
   const available = state.stock.filter(r => !r.sold);
   const sizeGroupMap = {};
@@ -839,7 +950,10 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Inventory</div><h2>Stock Register</h2></div>
-        <button className="btn btn-dark" onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-outline" onClick={() => setView("inward")}>📋 Inward History</button>
+          <button className="btn btn-dark" onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
+        </div>
       </div>
       <div className="card" style={{ padding: "14px 20px" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
