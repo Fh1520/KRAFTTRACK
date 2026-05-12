@@ -654,6 +654,7 @@ function SizeOutwardHistory({ sz, challanList }) {
 function StockTab({ state, update, stockNav, clearStockNav }) {
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState({ bf: "", gsm: "", shade: "", size: "", showSold: false });
+  const [openShip, setOpenShip] = useState(null);
 
   useEffect(() => {
     if (stockNav?.size) {
@@ -841,7 +842,6 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
       shipments[key].reels.push(r);
     });
     const shipList = Object.values(shipments).sort((a, b) => new Date(b.date) - new Date(a.date));
-    const [openShip, setOpenShip] = useState(null);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
