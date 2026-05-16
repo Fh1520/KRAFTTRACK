@@ -152,30 +152,16 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
 
 // ─── KRAFTTRACK LOGO ──────────────────────────────────────────────────────────
 function KraftReelIcon({ size = 30 }) {
-  // Scale factor relative to base 30px design
-  const s = size / 30;
-  const cx = size / 2, cy = size / 2;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} xmlns="http://www.w3.org/2000/svg">
-      {/* White rounded background */}
-      <rect width={size} height={size} rx={size * 0.23} fill="#ffffff" stroke="#e8e2d8" strokeWidth={size * 0.03}/>
-      {/* Outer kraft paper reel body */}
-      <circle cx={cx} cy={cy} r={size * 0.40} fill="#c8853a"/>
-      {/* Paper layers — concentric rings */}
-      <circle cx={cx} cy={cy} r={size * 0.37} fill="none" stroke="#d99a50" strokeWidth={size * 0.025}/>
-      <circle cx={cx} cy={cy} r={size * 0.33} fill="none" stroke="#bf7c30" strokeWidth={size * 0.025}/>
-      <circle cx={cx} cy={cy} r={size * 0.29} fill="none" stroke="#d99a50" strokeWidth={size * 0.022}/>
-      <circle cx={cx} cy={cy} r={size * 0.25} fill="none" stroke="#bf7c30" strokeWidth={size * 0.020}/>
-      <circle cx={cx} cy={cy} r={size * 0.21} fill="none" stroke="#d99a50" strokeWidth={size * 0.018}/>
-      {/* Core spool */}
-      <circle cx={cx} cy={cy} r={size * 0.16} fill="#8b5a1e"/>
-      <circle cx={cx} cy={cy} r={size * 0.13} fill="#a06828"/>
-      {/* Center hole */}
-      <circle cx={cx} cy={cy} r={size * 0.075} fill="#f5f0e8"/>
-      {/* Inner hub ring */}
-      <circle cx={cx} cy={cy} r={size * 0.05} fill="#d4c4a8"/>
-      {/* Highlight gloss */}
-      <circle cx={cx - size*0.10} cy={cy - size*0.10} r={size * 0.04} fill="rgba(255,255,255,0.22)"/>
+    <svg width={size} height={size} viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
+      <rect width="30" height="30" rx="7" fill="#1a1a1a"/>
+      <circle cx="15" cy="15" r="10" fill="#7a4f1e"/>
+      <circle cx="15" cy="15" r="8.5" fill="none" stroke="#9b6a2e" strokeWidth="1.2"/>
+      <circle cx="15" cy="15" r="7" fill="none" stroke="#b07f3a" strokeWidth="1.2"/>
+      <circle cx="15" cy="15" r="5.5" fill="none" stroke="#9b6a2e" strokeWidth="1"/>
+      <circle cx="15" cy="15" r="4" fill="#c49a45"/>
+      <circle cx="15" cy="15" r="2.2" fill="#1a1a1a"/>
+      <circle cx="14.2" cy="14.2" r="0.6" fill="#3a3a3a"/>
     </svg>
   );
 }
@@ -800,287 +786,14 @@ function BulkImportView({ state, update, onBack }) {
   );
 }
 
-// ─── EDIT INWARD MODAL ────────────────────────────────────────────────────────
-function EditInwardModal({ shipment, state, update, onClose }) {
-  // shipment = { invoiceNo, date, supplier, reels: [...] }
-  const [form, setForm] = useState({
-    supplier: shipment.supplier || "",
-    invoiceNo: shipment.invoiceNo || "",
-    date: shipment.date || today(),
-  });
-  const [reelEdits, setReelEdits] = useState(
-    shipment.reels.map(r => ({ ...r, _weight: String(r.weight), _size: r.size }))
-  );
-  // Cost rate state: keyed by "bf|gsm"
-  const initRates = {};
-  shipment.reels.forEach(r => {
-    const k = `${r.bf}|${r.gsm}`;
-    if (!initRates[k]) {
-      const cr = Number(r.costRate) || 0;
-      initRates[k] = { mode: "simple", rate: cr ? String(cr) : "", slabs: [{ kg: "", rate: cr ? String(cr) : "" }] };
-    }
-  });
-  const [gradeRates, setGradeRates] = useState(initRates);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const [msg, setMsg] = useState("");
-  const [addSize, setAddSize] = useState("");
-  const [addWeight, setAddWeight] = useState("");
-  const [addGrade, setAddGrade] = useState(state.grades[0] ? `${state.grades[0].bf}|${state.grades[0].gsm}|${state.grades[0].shade}` : "");
-
-  const gradeKeys = [...new Set(reelEdits.map(r => `${r.bf}|${r.gsm}`))];
-
-  const saveAll = () => {
-    // Update all reels in the shipment (by id)
-    const gradeGroups = {};
-    reelEdits.forEach(r => {
-      const k = `${r.bf}|${r.gsm}`;
-      if (!gradeGroups[k]) gradeGroups[k] = [];
-      gradeGroups[k].push(r);
-    });
-    update(s => {
-      reelEdits.forEach(re => {
-        const idx = s.stock.findIndex(x => x.id === re.id);
-        if (idx !== -1) {
-          const k = `${re.bf}|${re.gsm}`;
-          const gr = gradeRates[k];
-          const gradeKg = gradeGroups[k]?.reduce((sum, x) => sum + Number(x._weight || x.weight), 0) || 0;
-          const costRate = gr
-            ? (gr.mode === "simple" ? Number(gr.rate) || 0 : computeWeightedCostRate(gr.slabs, gradeKg))
-            : Number(s.stock[idx].costRate) || 0;
-          s.stock[idx] = {
-            ...s.stock[idx],
-            weight: re._weight || re.weight,
-            size: re._size || re.size,
-            supplier: form.supplier || s.stock[idx].supplier,
-            invoiceNo: form.invoiceNo || s.stock[idx].invoiceNo,
-            inwardDate: form.date || s.stock[idx].inwardDate,
-            costRate,
-          };
-        }
-      });
-    });
-    setMsg("✓ Inward updated!");
-    setTimeout(() => { setMsg(""); onClose(); }, 1200);
-  };
-
-  const deleteReel = (id) => {
-    update(s => { s.stock = s.stock.filter(x => x.id !== id); });
-    setReelEdits(p => p.filter(r => r.id !== id));
-    setConfirmDeleteId(null);
-  };
-
-  const addReel = () => {
-    if (!addSize || !addWeight || !addGrade) return;
-    const [bf, gsm, shade] = addGrade.split("|");
-    const newReel = {
-      id: genId(), sold: false,
-      bf, gsm, shade,
-      size: addSize, weight: addWeight,
-      supplier: form.supplier,
-      invoiceNo: form.invoiceNo,
-      inwardDate: form.date,
-      costRate: 0,
-      _weight: addWeight, _size: addSize,
-    };
-    update(s => { s.stock = [...s.stock, newReel]; });
-    setReelEdits(p => [...p, newReel]);
-    // ensure gradeRates entry
-    const k = `${bf}|${gsm}`;
-    if (!gradeRates[k]) setGradeRates(p => ({ ...p, [k]: { mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] } }));
-    setAddWeight(""); setAddSize("");
-  };
-
-  const bySize = {};
-  reelEdits.forEach(r => {
-    const sz = r._size || r.size;
-    if (!bySize[sz]) bySize[sz] = [];
-    bySize[sz].push(r);
-  });
-
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 18, padding: 0, width: "100%", maxWidth: 600, maxHeight: "92vh", overflowY: "auto", boxShadow: "0 24px 70px rgba(0,0,0,0.18)" }}>
-        {/* Header */}
-        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #e8e2d8", position: "sticky", top: 0, background: "#fff", zIndex: 10, borderRadius: "18px 18px 0 0" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div className="section-eyebrow">Edit</div>
-              <h2 style={{ fontSize: 20 }}>Edit Inward Entry</h2>
-            </div>
-            <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, color: "#9a9080", cursor: "pointer", lineHeight: 1 }}>×</button>
-          </div>
-        </div>
-
-        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
-          {msg && <div className="ok-box">{msg}</div>}
-
-          {/* Supplier details */}
-          <div className="card" style={{ padding: "16px 18px" }}>
-            <h3>Supplier Details</h3>
-            <div className="g3">
-              <div>
-                <label className="lbl">Supplier</label>
-                <input value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} placeholder="Supplier name" />
-              </div>
-              <div>
-                <label className="lbl">Invoice / Note No</label>
-                <input value={form.invoiceNo} onChange={e => setForm(f => ({ ...f, invoiceNo: e.target.value }))} placeholder="e.g. NP/0298" />
-              </div>
-              <div>
-                <label className="lbl">Date</label>
-                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-              </div>
-            </div>
-          </div>
-
-          {/* Reels list — editable weights/sizes */}
-          <div className="card" style={{ padding: "16px 18px" }}>
-            <h3>Reels — {reelEdits.length} total</h3>
-            {Object.entries(bySize).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => (
-              <div key={sz} style={{ marginBottom: 14 }}>
-                <div className="lbl" style={{ marginBottom: 6 }}>Size {sz}" — {reels.length} reel{reels.length !== 1 ? "s" : ""}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {reels.map((r, i) => (
-                    <div key={r.id} style={{ background: "#f8f7f4", border: "1.5px solid #e8e2d8", borderRadius: 10, padding: "8px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 100 }}>
-                      <div style={{ fontSize: 9, color: "#b0a898" }}>#{i + 1} · {r.bf} BF</div>
-                      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                        <input type="number" value={r._weight}
-                          onChange={e => setReelEdits(p => p.map(x => x.id === r.id ? { ...x, _weight: e.target.value } : x))}
-                          style={{ width: 72, padding: "4px 6px", fontSize: 12, textAlign: "center" }} />
-                        <span style={{ fontSize: 10, color: "#9a9080" }}>kg</span>
-                      </div>
-                      <select value={r._size}
-                        onChange={e => setReelEdits(p => p.map(x => x.id === r.id ? { ...x, _size: e.target.value } : x))}
-                        style={{ width: 80, padding: "3px 5px", fontSize: 11 }}>
-                        {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
-                      </select>
-                      <button onClick={() => setConfirmDeleteId(r.id)}
-                        style={{ background: "transparent", color: "#b83020", border: "1px solid #f0c0ba", borderRadius: 4, padding: "2px 8px", fontSize: 10, cursor: "pointer", marginTop: 2 }}>
-                        ✕ Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-            {reelEdits.length === 0 && <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>No reels — add some below.</div>}
-          </div>
-
-          {/* Add new reel */}
-          <div className="card" style={{ padding: "16px 18px" }}>
-            <h3>Add Reel to This Inward</h3>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <div style={{ flex: 1, minWidth: 120 }}>
-                <label className="lbl">Grade</label>
-                <select value={addGrade} onChange={e => setAddGrade(e.target.value)}>
-                  {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}|${g.shade}`}>{g.label}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1, minWidth: 90 }}>
-                <label className="lbl">Size</label>
-                <select value={addSize} onChange={e => setAddSize(e.target.value)}>
-                  <option value="">Select</option>
-                  {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1, minWidth: 90 }}>
-                <label className="lbl">Weight (kg)</label>
-                <input type="number" value={addWeight} onChange={e => setAddWeight(e.target.value)} placeholder="e.g. 274"
-                  onKeyDown={e => { if (e.key === "Enter") addReel(); }} />
-              </div>
-              <button className="btn btn-outline" onClick={addReel} style={{ flexShrink: 0, marginBottom: 1 }}>+ Add</button>
-            </div>
-          </div>
-
-          {/* Cost rates */}
-          <div className="card" style={{ padding: "16px 18px" }}>
-            <h3>Cost Rates — ₹/kg per grade</h3>
-            {gradeKeys.map(gk => {
-              const [bf, gsm] = gk.split("|");
-              const gr = gradeRates[gk] || { mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] };
-              const gradeLabel = `${bf} BF ${gsm} GSM`;
-              const gradeKg = reelEdits.filter(r => r.bf === bf && r.gsm === gsm).reduce((s, r) => s + Number(r._weight || r.weight), 0);
-              const effectiveRate = gr.mode === "simple" ? Number(gr.rate) || 0 : computeWeightedCostRate(gr.slabs, gradeKg);
-              return (
-                <div key={gk} style={{ marginBottom: 14, padding: "12px 14px", background: "#faf8f4", borderRadius: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{gradeLabel}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 11, color: "#6b5a2e" }}>{fmt(Math.round(gradeKg))} kg</span>
-                      {effectiveRate > 0 && gradeKg > 0 && (
-                        <span style={{ fontSize: 11, color: "#8b6914", fontWeight: 600 }}>= {fmtRs(effectiveRate * gradeKg)} total</span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: gr.mode === "slabs" ? 8 : 0 }}>
-                    {gr.mode === "simple" ? (
-                      <input type="number" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
-                        onChange={e => setGradeRates(p => ({ ...p, [gk]: { ...gr, rate: e.target.value } }))}
-                        style={{ flex: 1 }} />
-                    ) : null}
-                    <button className="btn btn-outline btn-sm" style={{ flexShrink: 0, fontSize: 11 }}
-                      onClick={() => setGradeRates(p => ({ ...p, [gk]: { ...gr, mode: gr.mode === "simple" ? "slabs" : "simple" } }))}>
-                      {gr.mode === "simple" ? "+ Split rates" : "Simple rate"}
-                    </button>
-                  </div>
-                  {gr.mode === "slabs" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {gr.slabs.map((sl, si) => (
-                        <div key={si} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input type="number" inputMode="numeric" value={sl.kg} placeholder="kg" style={{ flex: 1 }}
-                            onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
-                          <span style={{ fontSize: 12, color: "#6b5a2e", flexShrink: 0 }}>kg @</span>
-                          <input type="number" inputMode="numeric" value={sl.rate} placeholder="₹/kg" style={{ flex: 1 }}
-                            onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
-                          {gr.slabs.length > 1 && <button onClick={() => setGradeRates(p => { const slabs = p[gk].slabs.filter((_, i) => i !== si); return { ...p, [gk]: { ...p[gk], slabs } }; })} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 14, cursor: "pointer" }}>✕</button>}
-                        </div>
-                      ))}
-                      <button className="btn btn-outline btn-sm" style={{ alignSelf: "flex-start", fontSize: 11 }}
-                        onClick={() => setGradeRates(p => ({ ...p, [gk]: { ...p[gk], slabs: [...p[gk].slabs, { kg: "", rate: "" }] } }))}>
-                        + Add slab
-                      </button>
-                      <div style={{ fontSize: 11, color: "#6b5a2e", fontStyle: "italic" }}>Remaining kg auto-assigned to last slab rate</div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {gradeKeys.length === 0 && <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>No reels in this inward yet.</div>}
-          </div>
-
-          {/* Save / Cancel */}
-          <div style={{ display: "flex", gap: 10, paddingBottom: 4 }}>
-            <button className="btn btn-dark" style={{ flex: 1, justifyContent: "center", fontSize: 14, padding: "12px" }} onClick={saveAll}>
-              ✓ Save Changes
-            </button>
-            <button className="btn btn-outline" style={{ padding: "12px 20px" }} onClick={onClose}>Cancel</button>
-          </div>
-        </div>
-
-        {/* Delete reel confirm */}
-        {confirmDeleteId && (
-          <div className="modal-bg" onClick={() => setConfirmDeleteId(null)}>
-            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 320 }}>
-              <div className="serif" style={{ fontSize: 20, marginBottom: 10 }}>Remove this reel?</div>
-              <p style={{ fontSize: 13, color: "#8a8070", marginBottom: 20 }}>This reel will be permanently removed. Cannot be undone.</p>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button className="btn btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => setConfirmDeleteId(null)}>Cancel</button>
-                <button style={{ flex: 1, background: "#b83020", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontSize: 13, cursor: "pointer" }} onClick={() => deleteReel(confirmDeleteId)}>Remove</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── STOCK (INWARD) ───────────────────────────────────────────────────────────
 function StockTab({ state, update, stockNav, clearStockNav }) {
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState({ bf: "", gsm: "", shade: "", size: "", showSold: false });
   const [openShip, setOpenShip] = useState(null);
-  const [editingShipment, setEditingShipment] = useState(null);
+  const [editShipKey, setEditShipKey] = useState(null); // shipment being rate-edited
+  const [shipRates, setShipRates] = useState({});       // "bf|gsm" -> {mode,rate,slabs}
+  const [editWeightKey, setEditWeightKey] = useState(null); // shipment being weight-edited
 
   useEffect(() => {
     if (stockNav?.size) {
@@ -1393,35 +1106,165 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                   </div>
                   {isOpen && (
                     <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-                      {Object.entries(bySizeInShip).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => {
-                        const szTotal = reels.reduce((s, r) => s + Number(r.weight), 0);
-                        return (
-                          <div key={sz}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span className="serif" style={{ fontSize: 20 }}>{sz}"</span>
-                                <span className="tag" style={{ fontSize: 10 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
-                                <span style={{ fontSize: 11, color: "#9a9080" }}>{reels.length} reel{reels.length !== 1 ? "s" : ""}</span>
-                              </div>
-                              <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6050" }}>{fmt(Math.round(szTotal))} kg</span>
-                            </div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                              {reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r, i) => (
-                                <span key={r.id} style={{ background: r.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "3px 9px", fontSize: 12, color: r.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
-                                  {fmt(r.weight)} kg{r.sold ? " · sold" : ""}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <div style={{ borderTop: "1px solid #e8e2d8", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20, fontSize: 12 }}>
-                        <button
-                          className="btn btn-outline btn-sm"
-                          onClick={e => { e.stopPropagation(); setEditingShipment(sh); }}
-                          style={{ fontSize: 11 }}>
-                          ✎ Edit This Inward
+
+                      {/* Action buttons */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn btn-outline btn-sm"
+                          onClick={() => {
+                            if (editShipKey === key) { setEditShipKey(null); return; }
+                            // Seed rates from existing costRate on reels
+                            const grades = {};
+                            sh.reels.forEach(r => {
+                              const k2 = `${r.bf}|${r.gsm}`;
+                              if (!grades[k2]) grades[k2] = { mode: "simple", rate: String(r.costRate || ""), slabs: [{ kg: "", rate: String(r.costRate || "") }] };
+                            });
+                            setShipRates(grades);
+                            setEditShipKey(key);
+                            setEditWeightKey(null);
+                          }}>
+                          {editShipKey === key ? "✕ Cancel" : "₹ Edit Cost Rates"}
                         </button>
+                        <button className="btn btn-outline btn-sm"
+                          onClick={() => { setEditWeightKey(editWeightKey === key ? null : key); setEditShipKey(null); }}>
+                          {editWeightKey === key ? "✕ Cancel" : "✏ Edit Weights"}
+                        </button>
+                      </div>
+
+                      {/* Cost rate edit panel */}
+                      {editShipKey === key && (
+                        <div style={{ background: "#fff", border: "1.5px solid #8b6914", borderRadius: 10, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#8b6914", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.07em" }}>Set Cost Rate per Grade</div>
+                          {[...new Set(sh.reels.map(r => `${r.bf}|${r.gsm}`))].map(gk => {
+                            const [gbf, ggsm] = gk.split("|");
+                            const gr = shipRates[gk] || { mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] };
+                            const gradeKg = sh.reels.filter(r => r.bf === gbf && r.gsm === ggsm).reduce((s, r) => s + Number(r.weight), 0);
+                            return (
+                              <div key={gk} style={{ marginBottom: 12, padding: "10px 12px", background: "#faf8f4", borderRadius: 8 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                                  <span style={{ fontWeight: 600, fontSize: 13 }}>{gbf} BF {ggsm} GSM</span>
+                                  <span style={{ fontSize: 11, color: "#9a9080" }}>{fmt(Math.round(gradeKg))} kg</span>
+                                </div>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: gr.mode === "slabs" ? 8 : 0 }}>
+                                  {gr.mode === "simple" && (
+                                    <input type="number" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
+                                      onChange={e => setShipRates(p => ({ ...p, [gk]: { ...gr, rate: e.target.value } }))}
+                                      style={{ flex: 1 }} />
+                                  )}
+                                  <button className="btn btn-outline btn-sm" style={{ fontSize: 11, flexShrink: 0 }}
+                                    onClick={() => setShipRates(p => ({ ...p, [gk]: { ...gr, mode: gr.mode === "simple" ? "slabs" : "simple" } }))}>
+                                    {gr.mode === "simple" ? "+ Split" : "Simple"}
+                                  </button>
+                                </div>
+                                {gr.mode === "slabs" && (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                    {gr.slabs.map((sl, si) => (
+                                      <div key={si} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                        <input type="number" inputMode="numeric" value={sl.kg} placeholder="kg" style={{ flex: 1 }}
+                                          onChange={e => setShipRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
+                                        <span style={{ fontSize: 11, color: "#9a9080" }}>kg @</span>
+                                        <input type="number" inputMode="numeric" value={sl.rate} placeholder="₹/kg" style={{ flex: 1 }}
+                                          onChange={e => setShipRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
+                                        {gr.slabs.length > 1 && <button onClick={() => setShipRates(p => { const slabs = p[gk].slabs.filter((_,i) => i !== si); return { ...p, [gk]: { ...p[gk], slabs } }; })} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 14, cursor: "pointer" }}>✕</button>}
+                                      </div>
+                                    ))}
+                                    <button className="btn btn-outline btn-sm" style={{ alignSelf: "flex-start", fontSize: 11 }}
+                                      onClick={() => setShipRates(p => ({ ...p, [gk]: { ...p[gk], slabs: [...p[gk].slabs, { kg: "", rate: "" }] } }))}>+ Add slab</button>
+                                    <div style={{ fontSize: 10, color: "#9a9080", fontStyle: "italic" }}>Remaining kg assigned to last slab rate</div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <button className="btn btn-dark btn-sm" style={{ width: "100%", justifyContent: "center" }}
+                            onClick={() => {
+                              // Assign costRate to all reels in this shipment
+                              const gradeKgs = {};
+                              sh.reels.forEach(r => {
+                                const k2 = `${r.bf}|${r.gsm}`;
+                                if (!gradeKgs[k2]) gradeKgs[k2] = 0;
+                                gradeKgs[k2] += Number(r.weight);
+                              });
+                              update(s => {
+                                s.stock = s.stock.map(r => {
+                                  if (!sh.reels.some(x => x.id === r.id)) return r;
+                                  const k2 = `${r.bf}|${r.gsm}`;
+                                  const gr = shipRates[k2];
+                                  if (!gr) return r;
+                                  const costRate = gr.mode === "simple"
+                                    ? Number(gr.rate) || 0
+                                    : computeWeightedCostRate(gr.slabs, gradeKgs[k2]);
+                                  return { ...r, costRate };
+                                });
+                              });
+                              setEditShipKey(null);
+                            }}>
+                            ✓ Save Rates to All Reels
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Weight edit panel */}
+                      {editWeightKey === key && (
+                        <div style={{ background: "#fff", border: "1.5px solid #dde5f0", borderRadius: 10, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#6a6050", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Reel Weights</div>
+                          {Object.entries(bySizeInShip).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => (
+                            <div key={sz} style={{ marginBottom: 14 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                <span className="serif" style={{ fontSize: 18 }}>{sz}"</span>
+                                <span className="tag" style={{ fontSize: 10 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                {reels.map((r, i) => (
+                                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 5, background: "#f4f7fb", border: "1px solid #dde5f0", borderRadius: 7, padding: "5px 8px" }}>
+                                    <span style={{ fontSize: 10, color: "#b0a898" }}>#{i+1}</span>
+                                    <input type="number" inputMode="numeric" defaultValue={r.weight}
+                                      onBlur={e => {
+                                        const newWt = e.target.value;
+                                        if (newWt && !isNaN(newWt) && newWt !== String(r.weight)) {
+                                          update(s => { const idx = s.stock.findIndex(x => x.id === r.id); if (idx !== -1) s.stock[idx].weight = newWt; });
+                                        }
+                                      }}
+                                      style={{ width: 72, padding: "3px 6px", fontSize: 12 }} />
+                                    <span style={{ fontSize: 10, color: "#b0a898" }}>kg</span>
+                                    {r.sold && <span style={{ fontSize: 9, color: "#c07060" }}>sold</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{ fontSize: 11, color: "#9a9080", fontStyle: "italic", marginTop: 4 }}>Changes save automatically when you tap out of a field.</div>
+                        </div>
+                      )}
+
+                      {/* Size breakdown (read-only when not editing) */}
+                      {editShipKey !== key && editWeightKey !== key && (
+                        Object.entries(bySizeInShip).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => {
+                          const szTotal = reels.reduce((s, r) => s + Number(r.weight), 0);
+                          const costSet = reels.some(r => r.costRate);
+                          return (
+                            <div key={sz}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span className="serif" style={{ fontSize: 20 }}>{sz}"</span>
+                                  <span className="tag" style={{ fontSize: 10 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
+                                  <span style={{ fontSize: 11, color: "#9a9080" }}>{reels.length} reel{reels.length !== 1 ? "s" : ""}</span>
+                                  {costSet && <span style={{ fontSize: 10, color: "#2d6a4f", fontWeight: 600 }}>{fmtRs(reels[0].costRate)}/kg</span>}
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6050" }}>{fmt(Math.round(szTotal))} kg</span>
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                                {reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map(r => (
+                                  <span key={r.id} style={{ background: r.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "3px 9px", fontSize: 12, color: r.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
+                                    {fmt(r.weight)} kg{r.sold ? " · sold" : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+
+                      <div style={{ borderTop: "1px solid #e8e2d8", paddingTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                         <span style={{ color: "#9a9080" }}>{sh.reels.length} reels · {availCount} available</span>
                         <span style={{ fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg total</span>
                       </div>
@@ -1433,15 +1276,6 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
           </div>
         )}
       </div>
-      {editingShipment && (
-        <EditInwardModal
-          shipment={editingShipment}
-          state={state}
-          update={update}
-          onClose={() => setEditingShipment(null)}
-        />
-      )}
-    </div>
     );
   }
 
