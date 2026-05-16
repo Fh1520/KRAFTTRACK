@@ -1602,6 +1602,10 @@ function HistoryTab({ state, update }) {
   const [custView, setCustView] = useState("challans"); // "challans" | "customers" | "customerDetail"
   const [selCustomer, setSelCustomer] = useState("");
   const [custSearch, setCustSearch] = useState("");
+  const [ledgerTab, setLedgerTab] = useState("overview"); // "overview"|"rates"|"history"
+  const [bulkForm, setBulkForm] = useState({ grade: "", rate: "", fromDate: "", toDate: today() });
+  const [bulkPreview, setBulkPreview] = useState(null);
+  const [bulkDone, setBulkDone] = useState(false);
 
   const sold = state.stock.filter(r => r.sold);
   const challanMap = {};
@@ -1763,17 +1767,95 @@ function HistoryTab({ state, update }) {
     const custChallans = Object.values(challanMap).filter(c => (c.customer || "") === selCustomer);
     const revenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
     const profit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
-    return { cs, cd, revenue, profit };
+    return { cs, cd, revenue, profit, custChallans };
   })() : null;
+
+  // Bulk apply: compute preview
+  const computeBulkPreview = (form) => {
+    if (!form.grade || !form.rate || !form.fromDate || !selCustomer) return null;
+    const [bf, gsm] = form.grade.split("|");
+    const affected = state.stock.filter(r =>
+      r.sold && r.soldTo === selCustomer &&
+      r.bf === bf && r.gsm === gsm &&
+      r.soldDate >= form.fromDate && r.soldDate <= form.toDate
+    );
+    const challansAffected = [...new Set(affected.map(r => r.soldChallanNo || r.soldDate))];
+    return { reels: affected.length, challans: challansAffected.length, kg: affected.reduce((s, r) => s + Number(r.weight), 0) };
+  };
+
+  const doBulkApply = () => {
+    if (!bulkForm.grade || !bulkForm.rate || !bulkForm.fromDate) return;
+    const [bf, gsm] = bulkForm.grade.split("|");
+    update(s => {
+      s.stock = s.stock.map(r => {
+        if (!r.sold || r.soldTo !== selCustomer) return r;
+        if (r.bf !== bf || r.gsm !== gsm) return r;
+        if (r.soldDate < bulkForm.fromDate || r.soldDate > bulkForm.toDate) return r;
+        return { ...r, soldRate: Number(bulkForm.rate) };
+      });
+      if (!s.customerData) s.customerData = {};
+      if (!s.customerData[selCustomer]) s.customerData[selCustomer] = { rateHistory: {} };
+      const hist = s.customerData[selCustomer].rateHistory[bulkForm.grade] || [];
+      const entry = { rate: Number(bulkForm.rate), from: bulkForm.fromDate, to: bulkForm.toDate };
+      const exists = hist.some(h => h.rate === entry.rate && h.from === entry.from);
+      if (!exists) s.customerData[selCustomer].rateHistory[bulkForm.grade] = [...hist, entry].sort((a,b) => a.from.localeCompare(b.from));
+    });
+    setBulkDone(true); setBulkPreview(null);
+    setTimeout(() => setBulkDone(false), 2500);
+  };
+
+  // Rate trend SVG chart per grade
+  const RateTrendChart = ({ hist, color = "#8b6914" }) => {
+    if (!hist || hist.length < 1) return <div style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic" }}>No rate history yet.</div>;
+    const w = 280, h = 100, padL = 44, padB = 24, padT = 10, padR = 10;
+    const points = hist.map((h, i) => ({ x: h.from, rate: h.rate, label: fmtDate(h.from) }));
+    // Add "today" as last point
+    const today2 = today();
+    if (points[points.length - 1].x !== today2) points.push({ x: today2, rate: points[points.length - 1].rate, label: "Today" });
+    const rates = points.map(p => p.rate);
+    const minR = Math.min(...rates) * 0.97, maxR = Math.max(...rates) * 1.03;
+    const xScale = i => padL + (i / (points.length - 1)) * (w - padL - padR);
+    const yScale = r => padT + (1 - (r - minR) / (maxR - minR || 1)) * (h - padT - padB);
+    const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${xScale(i).toFixed(1)},${yScale(p.rate).toFixed(1)}`).join(" ");
+    const areaD = pathD + ` L${xScale(points.length-1).toFixed(1)},${h - padB} L${padL},${h - padB} Z`;
+    return (
+      <svg width="100%" viewBox={`0 0 ${w} ${h + 10}`} style={{ overflow: "visible" }}>
+        {/* Grid lines */}
+        {[0, 0.5, 1].map(t => {
+          const y = padT + t * (h - padT - padB);
+          const val = maxR - t * (maxR - minR);
+          return <g key={t}>
+            <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="#e8e2d8" strokeWidth="1" strokeDasharray="3,3"/>
+            <text x={padL - 4} y={y + 4} fontSize="8" textAnchor="end" fill="#9a9080">{fmtRs(Math.round(val))}</text>
+          </g>;
+        })}
+        {/* Area fill */}
+        <path d={areaD} fill={color} opacity="0.08"/>
+        {/* Line */}
+        <path d={pathD} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round"/>
+        {/* Points + labels */}
+        {points.map((p, i) => (
+          <g key={i}>
+            <circle cx={xScale(i)} cy={yScale(p.rate)} r="3.5" fill={color}/>
+            <text x={xScale(i)} y={h - padB + 14} fontSize="7.5" textAnchor="middle" fill="#9a9080"
+              transform={points.length > 4 ? `rotate(-30, ${xScale(i)}, ${h - padB + 14})` : ""}>
+              {p.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
       {isCustomerDetail ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button className="btn btn-outline btn-sm" onClick={() => { setCustView("customers"); setSelCustomer(""); setFilterCustomer(""); }}>← Customers</button>
+            <button className="btn btn-outline btn-sm" onClick={() => { setCustView("customers"); setSelCustomer(""); setFilterCustomer(""); setLedgerTab("overview"); }}>← Customers</button>
             <div><div className="section-eyebrow">Customer Ledger</div><h2>{selCustomer}</h2></div>
           </div>
+
           {/* Stats row */}
           {custLedger && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1791,35 +1873,137 @@ function HistoryTab({ state, update }) {
               ))}
             </div>
           )}
-          {/* Rate card - current rates + history */}
-          {custLedger && (
+
+          {/* Ledger tabs */}
+          <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4 }}>
+            {[["overview","📊 Overview"], ["rates","₹ Bulk Apply"], ["history","📈 Rate History"]].map(([tab, label]) => (
+              <button key={tab} onClick={() => setLedgerTab(tab)}
+                style={{ flex: 1, padding: "7px 4px", borderRadius: 7, border: "none", background: ledgerTab === tab ? "#fff" : "transparent", color: ledgerTab === tab ? "#1a1a1a" : "#8b6914", fontWeight: ledgerTab === tab ? 600 : 400, fontSize: 12, cursor: "pointer", boxShadow: ledgerTab === tab ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* OVERVIEW TAB — current rate card + top sizes */}
+          {ledgerTab === "overview" && custLedger && (
             <div className="card" style={{ padding: "14px 16px" }}>
-              <h3 style={{ marginBottom: 12 }}>Rate Card — ₹/kg per grade</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 0, border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+              <h3 style={{ marginBottom: 12 }}>Current Rate Card</h3>
+              <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
                 {state.grades.map((g, gi) => {
                   const k = `${g.bf}|${g.gsm}`;
                   const hist = custLedger.cd?.rateHistory?.[k] || [];
                   const currentRate = hist.length ? hist[hist.length - 1].rate : null;
+                  const gradeRev = custLedger.custChallans.reduce((s, ch) => s + ch.reels.filter(r => r.bf === g.bf && r.gsm === g.gsm).reduce((ss, r) => ss + (Number(r.soldRate)||0)*Number(r.weight), 0), 0);
                   return (
-                    <div key={k} style={{ padding: "10px 14px", borderBottom: gi < state.grades.length - 1 ? "1px solid #f5f0e8" : "none", display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{g.bf} BF {g.gsm} GSM <span className="tag" style={{ fontSize: 10, textTransform: "capitalize", marginLeft: 4 }}>{g.shade}</span></div>
+                    <div key={k} style={{ padding: "11px 14px", borderBottom: gi < state.grades.length - 1 ? "1px solid #f5f0e8" : "none", display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{g.bf} BF {g.gsm} GSM</div>
                       <div style={{ fontSize: 14, fontWeight: 700, color: currentRate ? "#1a1a1a" : "#b0a898" }}>{currentRate ? fmtRs(currentRate) + "/kg" : "Not set"}</div>
-                      {hist.length > 1 && (
-                        <div style={{ fontSize: 10, color: "#6b5a2e" }}>
-                          {hist.slice(-3).reverse().slice(1).map((h, i) => (
-                            <div key={i}>{fmtRs(h.rate)}/kg from {fmtDate(h.from)}</div>
-                          ))}
-                        </div>
-                      )}
+                      {gradeRev > 0 && <div style={{ fontSize: 11, color: "#6b5a2e" }}>{fmtRs(gradeRev)}</div>}
                     </div>
                   );
                 })}
               </div>
               {custLedger.cs.sizes && (
                 <div style={{ marginTop: 12, fontSize: 12, color: "#6b5a2e" }}>
-                  Top sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,4).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
+                  Top sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,5).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* BULK APPLY TAB */}
+          {ledgerTab === "rates" && (
+            <div className="card" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <h3>Bulk Apply Rate to Past Challans</h3>
+              <p style={{ fontSize: 12, color: "#8a8070", lineHeight: 1.6 }}>Select a grade, enter the rate, and pick a date range. All challans for this customer in that range will have their ₹/kg updated at once.</p>
+              {bulkDone && <div className="ok-box">✓ Rate applied to all matching challans!</div>}
+              <div className="g2">
+                <div>
+                  <label className="lbl">Grade</label>
+                  <select value={bulkForm.grade} onChange={e => { setBulkForm(f => ({...f, grade: e.target.value})); setBulkPreview(null); setBulkDone(false); }}>
+                    <option value="">Select grade</option>
+                    {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="lbl">Rate (₹/kg)</label>
+                  <input type="number" inputMode="numeric" value={bulkForm.rate} placeholder="e.g. 42"
+                    onChange={e => { setBulkForm(f => ({...f, rate: e.target.value})); setBulkPreview(null); setBulkDone(false); }} />
+                </div>
+                <div>
+                  <label className="lbl">From Date</label>
+                  <input type="date" value={bulkForm.fromDate} onChange={e => { setBulkForm(f => ({...f, fromDate: e.target.value})); setBulkPreview(null); }} />
+                </div>
+                <div>
+                  <label className="lbl">To Date</label>
+                  <input type="date" value={bulkForm.toDate} onChange={e => { setBulkForm(f => ({...f, toDate: e.target.value})); setBulkPreview(null); }} />
+                </div>
+              </div>
+              {!bulkPreview ? (
+                <button className="btn btn-outline" onClick={() => setBulkPreview(computeBulkPreview(bulkForm))}
+                  disabled={!bulkForm.grade || !bulkForm.rate || !bulkForm.fromDate}>
+                  Preview Changes
+                </button>
+              ) : bulkPreview.reels === 0 ? (
+                <div className="warn-box">No challans found for this grade in that date range.</div>
+              ) : (
+                <div style={{ background: "#fef9ee", border: "1px solid #f0d5a0", borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Preview</div>
+                  <div style={{ fontSize: 13, color: "#6a6050", marginBottom: 12 }}>
+                    This will set <strong>{fmtRs(Number(bulkForm.rate))}/kg</strong> on <strong>{bulkPreview.challans} challan{bulkPreview.challans !== 1 ? "s" : ""}</strong> · <strong>{bulkPreview.reels} reels</strong> · <strong>{fmt(Math.round(bulkPreview.kg))} kg</strong>
+                    <br/>Total value: <strong>{fmtRs(bulkPreview.kg * Number(bulkForm.rate))}</strong>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn btn-dark" onClick={doBulkApply}>✓ Apply Rate</button>
+                    <button className="btn btn-outline" onClick={() => setBulkPreview(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* RATE HISTORY TAB */}
+          {ledgerTab === "history" && custLedger && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {state.grades.map(g => {
+                const k = `${g.bf}|${g.gsm}`;
+                const hist = (custLedger.cd?.rateHistory?.[k] || []).slice().sort((a,b) => a.from.localeCompare(b.from));
+                // Build date ranges: each entry's "to" = next entry's "from" - 1 day (or today)
+                const withRanges = hist.map((h, i) => ({
+                  ...h,
+                  toDisplay: hist[i+1] ? hist[i+1].from : today()
+                }));
+                return (
+                  <div key={k} className="card" style={{ padding: "14px 16px" }}>
+                    <h3 style={{ marginBottom: 12 }}>{g.bf} BF {g.gsm} GSM — Rate History</h3>
+                    {/* Trend chart */}
+                    {hist.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <RateTrendChart hist={hist} color="#8b6914" />
+                      </div>
+                    )}
+                    {/* Timeline table */}
+                    {withRanges.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic" }}>No rate history. Use Bulk Apply to add rates.</div>
+                    ) : (
+                      <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: "#f5f0e8", padding: "8px 14px" }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em" }}>From</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em" }}>To</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "right" }}>Rate</span>
+                        </div>
+                        {withRanges.reverse().map((h, i) => (
+                          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 14px", borderTop: "1px solid #f5f0e8", background: i === 0 ? "#fdf9f0" : "#fff" }}>
+                            <span style={{ fontSize: 12 }}>{fmtDate(h.from)}</span>
+                            <span style={{ fontSize: 12, color: "#9a9080" }}>{i === 0 ? "Current" : fmtDate(h.toDisplay)}</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#8b6914", textAlign: "right" }}>{fmtRs(h.rate)}/kg</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -2255,10 +2439,36 @@ function ReportsTab({ state }) {
         ))}
       </div>
       {showTrend && trendData.length > 1 && (
-        <div className="card">
-          <h3>Monthly Sales Trend — Weight Dispatched</h3>
-          <BarChart data={trendData} color="#8b6914" unit="t" height={110} />
-          <div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Last {trendData.length} months. Darker bar = most recent.</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="card">
+            <h3>Monthly Weight Dispatched</h3>
+            <BarChart data={trendData} color="#8b6914" unit="t" height={100} />
+            <div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Last {trendData.length} months. Darker bar = most recent.</div>
+          </div>
+          {(() => {
+            const revData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0) }));
+            const profData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + ((Number(r.soldRate)||0)-(Number(r.costRate)||0))*Number(r.weight), 0) }));
+            const hasRevData = revData.some(d => d.value > 0);
+            const hasProfData = profData.some(d => d.value !== 0);
+            return (
+              <>
+                {hasRevData && (
+                  <div className="card">
+                    <h3>Monthly Revenue (₹)</h3>
+                    <BarChart data={revData} color="#2d6a4f" height={100} />
+                    <div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Based on challans with selling rates set.</div>
+                  </div>
+                )}
+                {hasProfData && (
+                  <div className="card">
+                    <h3>Monthly Gross Profit (₹)</h3>
+                    <BarChart data={profData} color="#1a1a1a" height={100} />
+                    <div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Only accurate for challans with both cost and sell rates set.</div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
       <div className="g2">
