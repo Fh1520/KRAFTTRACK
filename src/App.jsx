@@ -31,7 +31,24 @@ const GRADES = [
 ];
 const SHADE_OPTIONS = ["golden", "natural"];
 const SIZE_OPTIONS = Array.from({ length: 38 }, (_, i) => String(19 + i)); // 19–56
-const INITIAL_STATE = { stock: [], grades: GRADES, customers: [] };
+const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {} };
+
+function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
+function getCurrentRate(customerData, customer, bf, gsm) {
+  const hist = customerData?.[customer]?.rateHistory?.[`${bf}|${gsm}`];
+  if (!hist || hist.length === 0) return "";
+  return hist[hist.length - 1].rate;
+}
+function computeWeightedCostRate(slabs, totalKg) {
+  if (!slabs || slabs.length === 0) return 0;
+  if (slabs.length === 1) return Number(slabs[0].rate) || 0;
+  let totalCost = 0, usedKg = 0;
+  slabs.forEach(s => { const kg = Number(s.kg) || 0; totalCost += kg * (Number(s.rate) || 0); usedKg += kg; });
+  if (usedKg === 0) return Number(slabs[0].rate) || 0;
+  const remKg = totalKg - usedKg;
+  if (remKg > 0) totalCost += remKg * (Number(slabs[slabs.length - 1].rate) || 0);
+  return totalKg > 0 ? totalCost / totalKg : 0;
+}
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 function fmt(n) { return Number(n).toLocaleString("en-IN"); }
@@ -121,7 +138,7 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
         <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #ddd8ce", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", zIndex: 300, maxHeight: 180, overflowY: "auto", marginTop: 3 }}>
           {matches.map(c => (
             <div key={c} onMouseDown={() => { onChange(c); setShow(false); }}
-              style={{ padding: "9px 14px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #f3ede4" }}
+              style={{ padding: "9px 14px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #e8eef8" }}
               onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               {c}
@@ -133,21 +150,17 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
   );
 }
 
-// ─── KRAFT REEL LOGO ──────────────────────────────────────────────────────────
+// ─── KRAFTTRACK LOGO ──────────────────────────────────────────────────────────
 function KraftReelIcon({ size = 30 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
       <rect width="30" height="30" rx="7" fill="#1a1a1a"/>
-      {/* outer reel body */}
       <circle cx="15" cy="15" r="10" fill="#7a4f1e"/>
-      {/* wound paper layers */}
       <circle cx="15" cy="15" r="8.5" fill="none" stroke="#9b6a2e" strokeWidth="1.2"/>
       <circle cx="15" cy="15" r="7" fill="none" stroke="#b07f3a" strokeWidth="1.2"/>
       <circle cx="15" cy="15" r="5.5" fill="none" stroke="#9b6a2e" strokeWidth="1"/>
-      {/* core */}
       <circle cx="15" cy="15" r="4" fill="#c49a45"/>
       <circle cx="15" cy="15" r="2.2" fill="#1a1a1a"/>
-      {/* center hole shine */}
       <circle cx="14.2" cy="14.2" r="0.6" fill="#3a3a3a"/>
     </svg>
   );
@@ -218,8 +231,8 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        body{background:#f8f7f4}
-        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#edeae4}::-webkit-scrollbar-thumb{background:#c8b89a;border-radius:2px}
+        body{background:#f4f7fb}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#edeae4}::-webkit-scrollbar-thumb{background:#a0b8d8;border-radius:2px}
         input,select,textarea{background:#fff!important;border:1.5px solid #ddd8ce!important;color:#1a1a1a!important;padding:9px 12px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;width:100%;transition:all 0.15s;resize:vertical}
         input:focus,select:focus,textarea:focus{border-color:#8b6914!important;box-shadow:0 0 0 3px rgba(139,105,20,0.07)}
         select option{background:#fff;color:#1a1a1a}
@@ -231,11 +244,11 @@ export default function App() {
         .btn-sm{padding:6px 12px;font-size:12px}
         .card{background:#fff;border:1px solid #e8e2d8;border-radius:14px;padding:22px}
         .card-flat{background:#fff;border:1px solid #e8e2d8;border-radius:14px;overflow:hidden}
-        .tag{display:inline-block;background:#f5f0e8;border:1px solid #e5dece;border-radius:4px;padding:2px 8px;font-size:11px;color:#6b5a2e;font-weight:500}
+        .tag{display:inline-block;background:#f5f0e8;border:1px solid #e5dece;border-radius:4px;padding:2px 8px;font-size:11px;color:#2d2d2d;font-weight:500}
         .tag-green{background:#edf7f0;border-color:#b5dcc0;color:#2d6a4f}
         .tag-red{background:#fef0ee;border-color:#f0c0ba;color:#b83020}
         .tag-orange{background:#fef5e8;border-color:#f0d5a0;color:#a05800}
-        .tag-blue{background:#edf2fa;border-color:#b5c8e8;color:#2a4a7a}
+        .tag-blue{background:#f5f0e8;border-color:#c8b89a;color:#2d2d2d}
         .lbl{font-size:10px;color:#8a8070;text-transform:uppercase;letter-spacing:0.09em;margin-bottom:5px;display:block;font-weight:600}
         .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
         .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
@@ -243,7 +256,7 @@ export default function App() {
         .g5{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px}
         table{width:100%;border-collapse:collapse;font-size:13px}
         th{color:#9a9080;font-weight:600;text-align:left;padding:10px 16px;border-bottom:1px solid #e8e2d8;font-size:10px;text-transform:uppercase;letter-spacing:0.08em}
-        td{padding:12px 16px;border-bottom:1px solid #f3ede4}
+        td{padding:12px 16px;border-bottom:1px solid #e8eef8}
         tr:last-child td{border-bottom:none}
         tr:hover td{background:#faf8f4}
         .sep{height:1px;background:#e8e2d8;margin:16px 0}
@@ -258,7 +271,7 @@ export default function App() {
         .err-box{background:#fef0ee;border:1px solid #f0c0ba;border-radius:8px;padding:11px 14px;font-size:12px;color:#b83020}
         .warn-box{background:#fef5e8;border:1px solid #f0d5a0;border-radius:8px;padding:11px 14px;font-size:12px;color:#a05800}
         .low-alert{background:#fef9ee;border:1px solid #f0d5a0;border-radius:14px;padding:18px 22px}
-        .moderate-alert{background:#f4f8ff;border:1px solid #b5c8e8;border-radius:14px;padding:18px 22px}
+        .moderate-alert{background:#f4f8ff;border:1px solid #c8b89a;border-radius:14px;padding:18px 22px}
         .sync-dot{width:6px;height:6px;border-radius:50%;background:#52c478;display:inline-block;margin-right:5px;animation:pulse 2s infinite}
         .sync-dot-err{width:6px;height:6px;border-radius:50%;background:#e05030;display:inline-block;margin-right:5px}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -307,7 +320,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", overflowX: "auto", flex: 1, scrollbarWidth: "none" }}>
             {TABS.map(t => (
-              <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#1a1a1a" : "transparent"}`, padding: "13px 11px", fontSize: 12, fontWeight: tab === t ? 600 : 400, color: tab === t ? "#1a1a1a" : "#9a9080", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
+              <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#8b6914" : "transparent"}`, padding: "13px 11px", fontSize: 12, fontWeight: tab === t ? 600 : 400, color: tab === t ? "#1a1a1a" : "#9a9080", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
             ))}
           </div>
           <div className="nav-sync-text" style={{ fontSize: 10, color: saveError ? "#b83020" : "#b0a898", paddingLeft: 14, whiteSpace: "nowrap", display: "flex", alignItems: "center", flexShrink: 0 }}>
@@ -414,8 +427,8 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {moderateItems.map(item => (
-              <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1px solid #b5c8e8", borderRadius: 8, padding: "8px 14px" }}>
-                <div className="serif" style={{ fontSize: 20, color: "#2a4a7a" }}>{item.size}"</div>
+              <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1px solid #c8b89a", borderRadius: 8, padding: "8px 14px" }}>
+                <div className="serif" style={{ fontSize: 20, color: "#2d2d2d" }}>{item.size}"</div>
                 <div style={{ fontSize: 10, color: "#8a8070" }}>{item.bf} BF · {item.gsm} GSM</div>
               </div>
             ))}
@@ -436,10 +449,10 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
             {Object.entries(spec.sizes).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, cnt]) => (
               <div key={sz}
                 onClick={() => { setTab("Stock"); setStockNav({ size: sz }); }}
-                style={{ background: cnt === 0 ? "#fef0ee" : cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f8f7f4", border: `1px solid ${cnt === 0 ? "#f0c0ba" : cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#b5c8e8" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s, box-shadow 0.1s" }}
+                style={{ background: cnt === 0 ? "#fef0ee" : cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f4f7fb", border: `1px solid ${cnt === 0 ? "#f0c0ba" : cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#c8b89a" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s, box-shadow 0.1s" }}
                 onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.05)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.10)"; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}>
-                <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: cnt === 0 ? "#b83020" : cnt <= 2 ? "#a05800" : cnt === 3 ? "#2a4a7a" : "#1a1a1a" }}>{sz}"</div>
+                <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: cnt === 0 ? "#b83020" : cnt <= 2 ? "#a05800" : cnt === 3 ? "#2d2d2d" : "#1a1a1a" }}>{sz}"</div>
                 <div style={{ fontSize: 10, color: cnt === 0 ? "#c07060" : "#9a9080", marginTop: 4 }}>{cnt === 0 ? "out of stock" : `${cnt} reel${cnt !== 1 ? "s" : ""}`}</div>
               </div>
             ))}
@@ -557,7 +570,7 @@ function SizeInwardHistory({ sz, inwardGroups }) {
             const totalWt = grp.reels.reduce((s, r) => s + Number(r.weight), 0);
             const soldCount = grp.reels.filter(r => r.sold).length;
             return (
-              <div key={key} style={{ borderBottom: idx < groups.length - 1 ? "1px solid #f3ede4" : "none" }}>
+              <div key={key} style={{ borderBottom: idx < groups.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 <div onClick={() => setOpen(p => p === key ? null : key)}
                   style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, background: isOpen ? "#faf8f4" : "transparent", transition: "background 0.12s" }}
                   onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = "#faf8f4"; }}
@@ -574,10 +587,10 @@ function SizeInwardHistory({ sz, inwardGroups }) {
                     {soldCount > 0 && <span className="tag tag-red" style={{ fontSize: 10 }}>{soldCount} sold</span>}
                     <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
                 {isOpen && (
-                  <div style={{ background: "#faf8f4", borderTop: "1px solid #f0ebe0", padding: "12px 16px" }}>
+                  <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "12px 16px" }}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {grp.reels.map((r, j) => (
                         <span key={j} style={{ background: r.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "4px 10px", fontSize: 12, color: r.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
@@ -612,7 +625,7 @@ function SizeOutwardHistory({ sz, challanList }) {
             const isOpen = open === key;
             const totalWt = ch.reels.reduce((s, r) => s + Number(r.weight), 0);
             return (
-              <div key={key} style={{ borderBottom: idx < sorted.length - 1 ? "1px solid #f3ede4" : "none" }}>
+              <div key={key} style={{ borderBottom: idx < sorted.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 <div onClick={() => setOpen(p => p === key ? null : key)}
                   style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, background: isOpen ? "#faf8f4" : "transparent", transition: "background 0.12s" }}
                   onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = "#faf8f4"; }}
@@ -628,10 +641,10 @@ function SizeOutwardHistory({ sz, challanList }) {
                     <span className="tag tag-red" style={{ fontSize: 11 }}>{ch.reels.length} reel{ch.reels.length !== 1 ? "s" : ""}</span>
                     <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
                 {isOpen && (
-                  <div style={{ background: "#faf8f4", borderTop: "1px solid #f0ebe0", padding: "12px 16px" }}>
+                  <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "12px 16px" }}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {ch.reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r, j) => (
                         <span key={r.id || j} style={{ background: "#fef0ee", border: "1px solid #f0c0ba", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#9a4030", fontWeight: 500 }}>
@@ -645,6 +658,129 @@ function SizeOutwardHistory({ sz, challanList }) {
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── BULK IMPORT ─────────────────────────────────────────────────────────────
+function BulkImportView({ state, update, onBack }) {
+  const [rows, setRows] = useState([]);
+  const [status, setStatus] = useState("idle"); // idle | preview | importing | done | error
+  const [errMsg, setErrMsg] = useState("");
+  const fileRef = useRef(null);
+
+  const VALID_SHADES = ["golden", "natural"];
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        // Parse xlsx using SheetJS loaded via CDN — use raw binary
+        const data = evt.target.result;
+        // Manual CSV fallback — parse as ArrayBuffer using a simple approach
+        // We'll use the xlsx library imported at top
+        import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs').then(XLSX => {
+          const wb = XLSX.read(data, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+          const valid = [];
+          const errors = [];
+          json.forEach((row, i) => {
+            const bf = String(row.bf || "").trim();
+            const gsm = String(row.gsm || "").trim();
+            const shade = String(row.shade || "").trim().toLowerCase();
+            const size = String(row.size || "").trim();
+            const weight = String(row.weight || "").trim();
+            if (!bf && !gsm && !shade && !size && !weight) return; // skip empty
+            if (!bf || !gsm || !shade || !size || !weight) { errors.push(`Row ${i+2}: missing fields`); return; }
+            if (!VALID_SHADES.includes(shade)) { errors.push(`Row ${i+2}: shade must be 'golden' or 'natural'`); return; }
+            if (isNaN(Number(weight)) || Number(weight) <= 0) { errors.push(`Row ${i+2}: invalid weight`); return; }
+            valid.push({ bf, gsm, shade, size, weight: String(weight) });
+          });
+          if (errors.length > 0) { setErrMsg(errors.slice(0,5).join("\n") + (errors.length > 5 ? `\n...and ${errors.length-5} more` : "")); setStatus("error"); return; }
+          if (valid.length === 0) { setErrMsg("No valid rows found. Check your file."); setStatus("error"); return; }
+          setRows(valid);
+          setStatus("preview");
+        });
+      } catch(e) { setErrMsg("Could not read file: " + e.message); setStatus("error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const doImport = () => {
+    setStatus("importing");
+    const now = today();
+    const newReels = rows.map(r => ({
+      id: genId(), sold: false,
+      bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size, weight: r.weight,
+      supplier: "Opening Stock", invoiceNo: "BULK-IMPORT", inwardDate: now,
+    }));
+    update(s => { s.stock = [...s.stock, ...newReels]; });
+    setTimeout(() => setStatus("done"), 800);
+  };
+
+  // Group preview by grade
+  const byGrade = {};
+  rows.forEach(r => {
+    const k = `${r.bf} BF ${r.gsm} GSM ${r.shade}`;
+    if (!byGrade[k]) byGrade[k] = { reels: 0, sizes: {} };
+    byGrade[k].reels++;
+    byGrade[k].sizes[r.size] = (byGrade[k].sizes[r.size] || 0) + 1;
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="btn btn-outline btn-sm" onClick={onBack}>← Back</button>
+        <div><div className="section-eyebrow">Import</div><h2>Bulk Stock Import</h2></div>
+      </div>
+
+      {status === "done" ? (
+        <div className="card" style={{ textAlign: "center", padding: 52 }}>
+          <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
+          <div className="serif" style={{ fontSize: 28 }}>Import Complete</div>
+          <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{rows.length} reels added to stock.</div>
+          <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={onBack}>Go to Stock</button>
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <h3>Upload your filled Excel file</h3>
+            <p style={{ fontSize: 13, color: "#6a6050", marginBottom: 14, lineHeight: 1.7 }}>
+              Columns required: <strong>bf · gsm · shade · size · weight</strong><br/>
+              All reels will be imported as Opening Stock dated today.
+            </p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ marginBottom: 12 }} />
+            {status === "error" && (
+              <div className="err-box" style={{ whiteSpace: "pre-line", marginTop: 8 }}>{errMsg}</div>
+            )}
+          </div>
+
+          {status === "preview" && (
+            <div className="card">
+              <h3>Preview — {rows.length} reels found</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+                {Object.entries(byGrade).map(([grade, data]) => (
+                  <div key={grade} style={{ background: "#faf8f4", borderRadius: 10, padding: "12px 16px" }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>{grade} — {data.reels} reels</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {Object.entries(data.sizes).sort((a,b) => Number(a[0])-Number(b[0])).map(([sz, cnt]) => (
+                        <span key={sz} className="tag" style={{ fontSize: 11 }}>{sz}" × {cnt}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button className="btn btn-dark" style={{ width: "100%", justifyContent: "center", fontSize: 15, padding: "12px" }}
+                onClick={doImport} disabled={status === "importing"}>
+                {status === "importing" ? "Importing…" : `✓ Import All ${rows.length} Reels`}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -667,14 +803,22 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
   const [reels, setReels] = useState([]);
   const [newReel, setNewReel] = useState({ size: "", weight: "" });
   const [saved, setSaved] = useState(false);
+  const [gradeRates, setGradeRates] = useState({}); // "bf|gsm" -> { mode:"simple"|"slabs", rate:"", slabs:[{kg,rate}] }
   const weightInputRef = useRef(null);
+
+  // Detect grades in current reels and ensure gradeRates has an entry for each
+  const detectedGrades = [...new Set(reels.map(r => `${form.bf}|${form.gsm}`))];
+  // When grade changes or reels added, seed gradeRates entry
+  const ensureGradeRate = (bf, gsm) => {
+    const k = `${bf}|${gsm}`;
+    if (!gradeRates[k]) setGradeRates(p => ({ ...p, [k]: { mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] } }));
+  };
 
   const addReel = () => {
     if (!newReel.size || !newReel.weight) return;
-    setReels(p => [...p, { ...newReel, id: genId() }]);
+    ensureGradeRate(form.bf, form.gsm);
+    setReels(p => [...p, { ...newReel, id: genId(), bf: form.bf, gsm: form.gsm, shade: form.shade }]);
     setNewReel(r => ({ ...r, weight: "" }));
-    // Re-focus + scroll input into view so keyboard stays up (mobile) and
-    // page doesn't jump away from the input (laptop)
     setTimeout(() => {
       weightInputRef.current?.focus();
       weightInputRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -683,9 +827,24 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
 
   const submit = () => {
     if (!form.supplier || reels.length === 0) return;
-    const nr = reels.map(r => ({ ...r, id: genId(), sold: false, bf: form.bf, gsm: form.gsm, shade: form.shade, supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date }));
+    // Group reels by grade to assign costRate
+    const gradeGroups = {};
+    reels.forEach(r => {
+      const k = `${r.bf}|${r.gsm}`;
+      if (!gradeGroups[k]) gradeGroups[k] = [];
+      gradeGroups[k].push(r);
+    });
+    const nr = reels.map(r => {
+      const k = `${r.bf}|${r.gsm}`;
+      const gr = gradeRates[k];
+      const gradeKg = gradeGroups[k].reduce((s, x) => s + Number(x.weight), 0);
+      const costRate = gr
+        ? (gr.mode === "simple" ? Number(gr.rate) || 0 : computeWeightedCostRate(gr.slabs, gradeKg))
+        : 0;
+      return { ...r, id: genId(), sold: false, supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date, costRate };
+    });
     update(s => { s.stock = [...s.stock, ...nr]; });
-    setSaved(true); setReels([]);
+    setSaved(true); setReels([]); setGradeRates({});
     setTimeout(() => { setSaved(false); setView("list"); }, 1800);
   };
 
@@ -745,6 +904,59 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
         })}
       </div>
 
+      {/* Cost Rates per grade */}
+      {reels.length > 0 && (
+        <div className="card">
+          <h3 style={{ marginBottom: 12 }}>Cost Rates — ₹/kg per grade</h3>
+          {[...new Set(reels.map(r => `${r.bf}|${r.gsm}`))].map(gk => {
+            const [bf, gsm] = gk.split("|");
+            const gr = gradeRates[gk] || { mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] };
+            const gradeLabel = `${bf} BF ${gsm} GSM`;
+            const gradeKg = reels.filter(r => r.bf === bf && r.gsm === gsm).reduce((s, r) => s + Number(r.weight), 0);
+            return (
+              <div key={gk} style={{ marginBottom: 14, padding: "12px 14px", background: "#faf8f4", borderRadius: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{gradeLabel}</span>
+                  <span style={{ fontSize: 11, color: "#6b5a2e" }}>{fmt(Math.round(gradeKg))} kg</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: gr.mode === "slabs" ? 8 : 0 }}>
+                  {gr.mode === "simple" ? (
+                    <input type="number" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
+                      onChange={e => setGradeRates(p => ({ ...p, [gk]: { ...gr, rate: e.target.value } }))}
+                      style={{ flex: 1 }} />
+                  ) : null}
+                  <button className="btn btn-outline btn-sm" style={{ flexShrink: 0, fontSize: 11 }}
+                    onClick={() => setGradeRates(p => ({ ...p, [gk]: { ...gr, mode: gr.mode === "simple" ? "slabs" : "simple" } }))}>
+                    {gr.mode === "simple" ? "+ Split rates" : "Simple rate"}
+                  </button>
+                </div>
+                {gr.mode === "slabs" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {gr.slabs.map((sl, si) => (
+                      <div key={si} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input type="number" inputMode="numeric" value={sl.kg} placeholder="kg"
+                          style={{ flex: 1 }}
+                          onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
+                        <span style={{ fontSize: 12, color: "#6b5a2e", flexShrink: 0 }}>kg @</span>
+                        <input type="number" inputMode="numeric" value={sl.rate} placeholder="₹/kg"
+                          style={{ flex: 1 }}
+                          onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
+                        {gr.slabs.length > 1 && <button onClick={() => setGradeRates(p => { const slabs = p[gk].slabs.filter((_, i) => i !== si); return { ...p, [gk]: { ...p[gk], slabs } }; })} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 14, cursor: "pointer" }}>✕</button>}
+                      </div>
+                    ))}
+                    <button className="btn btn-outline btn-sm" style={{ alignSelf: "flex-start", fontSize: 11 }}
+                      onClick={() => setGradeRates(p => ({ ...p, [gk]: { ...p[gk], slabs: [...p[gk].slabs, { kg: "", rate: "" }] } }))}>
+                      + Add slab
+                    </button>
+                    <div style={{ fontSize: 11, color: "#6b5a2e", fontStyle: "italic" }}>Remaining kg auto-assigned to last slab rate</div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── STICKY ENTRY BAR — stays at bottom regardless of scroll ── */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 120, background: "#f8f7f4", padding: "10px 0 0 0" }}>
         <div className="card" style={{ borderTop: "2px solid #e8e2d8", borderRadius: "14px 14px 14px 14px", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)" }}>
@@ -752,7 +964,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
             <div style={{ flex: 1, minWidth: 110 }}>
               <label className="lbl">Size</label>
               <select value={newReel.size} onChange={e => setNewReel(r => ({ ...r, size: e.target.value }))}>
-                <option value="">Select</option>{SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+                <option value="">Select</option>{SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
               </select>
             </div>
             <div style={{ flex: 1, minWidth: 110 }}>
@@ -769,7 +981,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
             </div>
             <button className="btn btn-outline" onMouseDown={e => e.preventDefault()} onClick={addReel} style={{ flexShrink: 0 }}>+ Add</button>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #f3ede4" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #e8eef8" }}>
             <div style={{ fontSize: 13, color: "#8a8070" }}>
               Total: <span className="serif" style={{ fontSize: 20, color: "#1a1a1a" }}>{fmt(totalWt)} kg</span>
               <span style={{ fontSize: 11, color: "#b0a898", marginLeft: 6 }}>({reels.length} reels)</span>
@@ -865,7 +1077,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                 bySizeInShip[r.size].push(r);
               });
               return (
-                <div key={key} style={{ borderBottom: idx < shipList.length - 1 ? "1px solid #f3ede4" : "none" }}>
+                <div key={key} style={{ borderBottom: idx < shipList.length - 1 ? "1px solid #e8eef8" : "none" }}>
                   <div onClick={() => setOpenShip(p => p === key ? null : key)}
                     style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
                     onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = "#faf8f4"; }}
@@ -887,10 +1099,10 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                         {Object.keys(bySizeInShip).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInShip).length - 4}</span>}
                       </div>
                     </div>
-                    <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                    <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                   </div>
                   {isOpen && (
-                    <div style={{ background: "#faf8f4", borderTop: "1px solid #f0ebe0", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
                       {Object.entries(bySizeInShip).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => {
                         const szTotal = reels.reduce((s, r) => s + Number(r.weight), 0);
                         return (
@@ -928,6 +1140,11 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     );
   }
 
+  // ── BULK IMPORT VIEW ──
+  if (view === "import") {
+    return <BulkImportView state={state} update={update} onBack={() => setView("list")} />;
+  }
+
   // ── LIST VIEW ──
   const available = state.stock.filter(r => !r.sold);
   const sizeGroupMap = {};
@@ -936,7 +1153,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     if (filter.bf && r.bf !== filter.bf) return;
     if (filter.gsm && r.gsm !== filter.gsm) return;
     if (filter.shade && r.shade !== filter.shade) return;
-    if (filter.size && r.size !== filter.size) return;
+    if (filter.size && String(r.size).replace(/"/g,"").trim() !== filter.size) return;
     const k = `${r.size}|${r.bf}|${r.gsm}`;
     if (!sizeGroupMap[k]) sizeGroupMap[k] = { size: r.size, bf: r.bf, gsm: r.gsm, shade: r.shade, reels: [], soldReels: [] };
     if (r.sold) sizeGroupMap[k].soldReels.push(r);
@@ -952,6 +1169,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
         <div><div className="section-eyebrow">Inventory</div><h2>Stock Register</h2></div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("inward")}>📋 Inward History</button>
+          <button className="btn btn-outline" onClick={() => setView("import")} style={{ borderColor: "#8b6914", color: "#8b6914" }}>📥 Bulk Import</button>
           <button className="btn btn-dark" onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
         </div>
       </div>
@@ -973,7 +1191,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
           <div style={{ minWidth: 110 }}>
             <label className="lbl">Size</label>
             <select value={filter.size} onChange={e => setFilter(f => ({ ...f, size: e.target.value }))}>
-              <option value="">All Sizes</option>{SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+              <option value="">All Sizes</option>{SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
             </select>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
@@ -998,13 +1216,13 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
             const isModerate = lowCount === 3;
             return (
               <div key={`${grp.size}${grp.bf}${grp.gsm}`}
-                style={{ padding: "12px 16px", borderBottom: idx < sizeGroups.length - 1 ? "1px solid #f3ede4" : "none", cursor: "pointer", transition: "background 0.12s" }}
+                style={{ padding: "12px 16px", borderBottom: idx < sizeGroups.length - 1 ? "1px solid #e8eef8" : "none", cursor: "pointer", transition: "background 0.12s" }}
                 onClick={() => { setFilter(f => ({ ...f, size: grp.size })); setView("size"); }}
                 onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 {/* Line 1: size + grade + count + status + arrow */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: grp.reels.length > 0 ? 6 : 0 }}>
-                  <span className="serif" style={{ fontSize: 26, lineHeight: 1, color: isCritical ? "#a05800" : isModerate ? "#2a4a7a" : "#1a1a1a", minWidth: 48, flexShrink: 0 }}>{grp.size}"</span>
+                  <span className="serif" style={{ fontSize: 26, lineHeight: 1, color: isCritical ? "#a05800" : isModerate ? "#2d2d2d" : "#1a1a1a", minWidth: 48, flexShrink: 0 }}>{grp.size}"</span>
                   <span className="tag" style={{ flexShrink: 0, fontSize: 11 }}>{grp.bf} BF · {grp.gsm} GSM</span>
                   <div style={{ flex: 1 }} />
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -1016,7 +1234,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                     {isModerate && <span className="tag tag-blue" style={{ fontSize: 10 }}>3 left</span>}
                     {filter.showSold && grp.soldReels.length > 0 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{grp.soldReels.length} sold</span>}
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0 }}>›</div>
+                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0 }}>›</div>
                 </div>
                 {/* Line 2: weight chips (capped at 6) + total */}
                 {grp.reels.length > 0 && (
@@ -1044,7 +1262,6 @@ function SellTab({ state, update }) {
   const [customer, setCustomer] = useState("");
   const [date, setDate] = useState(today());
 
-  // Smart challan suggestion: find last used challan, parse numeric suffix, +1
   const suggestedChallan = (() => {
     const last = state.stock
       .filter(r => r.sold && r.soldChallanNo && r.soldDate)
@@ -1057,39 +1274,73 @@ function SellTab({ state, update }) {
   const [selected, setSelected] = useState([]);
   const [filter, setFilter] = useState({ bf: "", gsm: "", size: "" });
   const [done, setDone] = useState(null);
+  const [sellRates, setSellRates] = useState({}); // "bf|gsm" -> rate string
+
+  // Auto-load rates from customerData when customer changes
+  useEffect(() => {
+    if (!customer || !state.customerData?.[customer]) { setSellRates({}); return; }
+    const hist = state.customerData[customer]?.rateHistory || {};
+    const rates = {};
+    Object.entries(hist).forEach(([k, arr]) => { if (arr?.length) rates[k] = String(arr[arr.length - 1].rate); });
+    setSellRates(rates);
+  }, [customer]);
 
   const available = state.stock.filter(r => !r.sold);
   const filtered = available.filter(r => {
     if (filter.bf && r.bf !== filter.bf) return false;
     if (filter.gsm && r.gsm !== filter.gsm) return false;
-    if (filter.size && r.size !== filter.size) return false;
+    if (filter.size && String(r.size).replace(/"/g,"").trim() !== filter.size) return false;
     return true;
   }).sort((a, b) => Number(a.size) - Number(b.size) || Number(a.weight) - Number(b.weight));
   const selReels = state.stock.filter(r => selected.includes(r.id));
   const totalWt = selReels.reduce((s, r) => s + Number(r.weight), 0);
   const toggleReel = id => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
+  // Compute sale value from sell rates
+  const totalValue = selReels.reduce((s, r) => {
+    const rate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
+    return s + rate * Number(r.weight);
+  }, 0);
+
+  // Grades present in selection
+  const selGrades = [...new Set(selReels.map(r => `${r.bf}|${r.gsm}`))];
+
   const noStockWarning = filter.size && available.filter(r => r.size === filter.size).length === 0
     ? `No ${filter.size}" reels in stock. Please check the size.` : null;
 
   const sell = () => {
     if (!customer || selected.length === 0) return;
-    const wt = totalWt; const ct = selReels.length;
+    const wt = totalWt; const ct = selReels.length; const val = totalValue;
     update(s => {
-      s.stock = s.stock.map(r => selected.includes(r.id) ? { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo } : r);
+      s.stock = s.stock.map(r => {
+        if (!selected.includes(r.id)) return r;
+        const soldRate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate };
+      });
       if (customer.trim() && !s.customers.includes(customer.trim())) {
         s.customers = [...(s.customers || []), customer.trim()].sort();
       }
+      // Save rate to customerData history if set
+      if (!s.customerData) s.customerData = {};
+      if (!s.customerData[customer]) s.customerData[customer] = { rateHistory: {} };
+      Object.entries(sellRates).forEach(([k, rate]) => {
+        if (!rate) return;
+        const hist = s.customerData[customer].rateHistory[k] || [];
+        const lastRate = hist.length ? hist[hist.length - 1].rate : null;
+        if (String(lastRate) !== String(rate)) {
+          s.customerData[customer].rateHistory[k] = [...hist, { rate: Number(rate), from: date }];
+        }
+      });
     });
-    setDone({ count: ct, wt, customer });
+    setDone({ count: ct, wt, customer, val });
   };
 
   if (done) return (
     <div className="card fade-in" style={{ textAlign: "center", padding: 56 }}>
       <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
       <div className="serif" style={{ fontSize: 28 }}>Sale Recorded</div>
-      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} reels · {fmt(done.wt)} kg sold to {done.customer}</div>
-      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); }}>Record Another Sale</button>
+      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} reels · {fmt(done.wt)} kg · {done.val ? fmtRs(done.val) : "no rate set"} → {done.customer}</div>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); }}>Record Another Sale</button>
     </div>
   );
 
@@ -1102,11 +1353,35 @@ function SellTab({ state, update }) {
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers || []} /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div>
-            <label className="lbl">Challan No (physical){suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. CH-101" />
+            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313" />
           </div>
         </div>
       </div>
+
+      {/* Sell rates per grade */}
+      {customer && (
+        <div className="card">
+          <h3>Selling Rates — ₹/kg {!selGrades.length && <span style={{ fontWeight: 400, color: "#9a9080", fontSize: 11 }}>(select reels to see grades)</span>}</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {state.grades.map(g => {
+              const k = `${g.bf}|${g.gsm}`;
+              const rate = sellRates[k] || "";
+              const selKg = selReels.filter(r => r.bf === g.bf && r.gsm === g.gsm).reduce((s, r) => s + Number(r.weight), 0);
+              return (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ minWidth: 140, fontSize: 12, fontWeight: 500 }}>{g.bf} BF {g.gsm} GSM</span>
+                  <input type="number" inputMode="numeric" value={rate} placeholder="₹/kg"
+                    onChange={e => setSellRates(p => ({ ...p, [k]: e.target.value }))}
+                    style={{ width: 110 }} />
+                  {selKg > 0 && rate && <span style={{ fontSize: 12, color: "#8b6914", fontWeight: 600 }}>{fmtRs(selKg * Number(rate))}</span>}
+                  {selKg > 0 && !rate && <span style={{ fontSize: 11, color: "#b0a898", fontStyle: "italic" }}>rate not set</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="card">
         <h3>Select Reels Being Sold</h3>
         <div className="g3" style={{ marginBottom: 12 }}>
@@ -1120,7 +1395,7 @@ function SellTab({ state, update }) {
           <div>
             <label className="lbl">Filter by Size</label>
             <select value={filter.size} onChange={e => setFilter(f => ({ ...f, size: e.target.value }))}>
-              <option value="">All Sizes</option>{SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+              <option value="">All Sizes</option>{SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
             </select>
           </div>
           <div style={{ display: "flex", alignItems: "flex-end" }}>
@@ -1136,7 +1411,7 @@ function SellTab({ state, update }) {
               const sel = selected.includes(r.id);
               return (
                 <div key={r.id} onClick={() => toggleReel(r.id)}
-                  style={{ cursor: "pointer", background: sel ? "#fdf9f0" : idx % 2 === 0 ? "#fff" : "#faf8f4", borderBottom: idx < filtered.length - 1 ? "1px solid #f3ede4" : "none", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, transition: "background 0.1s" }}>
+                  style={{ cursor: "pointer", background: sel ? "#fdf9f0" : idx % 2 === 0 ? "#fff" : "#faf8f4", borderBottom: idx < filtered.length - 1 ? "1px solid #e8eef8" : "none", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, transition: "background 0.1s" }}>
                   <div style={{ width: 20, height: 20, border: `2px solid ${sel ? "#8b6914" : "#ccc8c0"}`, borderRadius: 4, background: sel ? "#8b6914" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.1s" }}>
                     {sel && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}
                   </div>
@@ -1161,7 +1436,8 @@ function SellTab({ state, update }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div className="lbl">Selected for Sale</div>
-              <div className="serif" style={{ fontSize: 28, lineHeight: 1.1 }}>{selected.length} reels · {fmt(totalWt)} kg</div>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{selected.length} reels · {fmt(totalWt)} kg</div>
+              {totalValue > 0 && <div style={{ fontSize: 14, color: "#8b6914", fontWeight: 700, marginTop: 4 }}>{fmtRs(totalValue)}</div>}
               {!customer && <div style={{ fontSize: 11, color: "#b83020", marginTop: 6 }}>Enter customer name to confirm.</div>}
             </div>
             <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer}>✓ Confirm Sale</button>
@@ -1309,7 +1585,7 @@ function HistoryTab({ state, update }) {
             return (
               <div key={name}
                 onClick={() => { setSelCustomer(name); setCustView("customerDetail"); setFilterCustomer(name); setSearch(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); }}
-                style={{ padding: "14px 18px", borderBottom: idx < arr.length - 1 ? "1px solid #f3ede4" : "none", cursor: "pointer", transition: "background 0.12s" }}
+                style={{ padding: "14px 18px", borderBottom: idx < arr.length - 1 ? "1px solid #e8eef8" : "none", cursor: "pointer", transition: "background 0.12s" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1326,7 +1602,7 @@ function HistoryTab({ state, update }) {
                     <div style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{(cs.kg / 1000).toFixed(2)} t</div>
                     <div style={{ fontSize: 10, color: "#b0a898", marginTop: 2 }}>Last: {fmtDate(cs.lastDate)}</div>
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16 }}>›</div>
+                  <div style={{ color: "#a0b8d8", fontSize: 16 }}>›</div>
                 </div>
               </div>
             );
@@ -1341,20 +1617,70 @@ function HistoryTab({ state, update }) {
 
   const isCustomerDetail = custView === "customerDetail";
 
+  // Customer ledger data
+  const custLedger = selCustomer ? (() => {
+    const cs = custStats[selCustomer] || {};
+    const cd = state.customerData?.[selCustomer] || {};
+    const custChallans = Object.values(challanMap).filter(c => (c.customer || "") === selCustomer);
+    const revenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
+    const profit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
+    return { cs, cd, revenue, profit };
+  })() : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
       {isCustomerDetail ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button className="btn btn-outline btn-sm" onClick={() => { setCustView("customers"); setSelCustomer(""); setFilterCustomer(""); }}>← Customers</button>
-            <div><div className="section-eyebrow">Customer Detail</div><h2>{selCustomer}</h2></div>
+            <div><div className="section-eyebrow">Customer Ledger</div><h2>{selCustomer}</h2></div>
           </div>
-          {custStats[selCustomer] && (
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#6a6050", paddingLeft: 2 }}>
-              <span>📦 {custStats[selCustomer].challans} challans</span>
-              <span>🧻 {custStats[selCustomer].reels} reels</span>
-              <span>⚖️ {fmt(Math.round(custStats[selCustomer].kg))} kg ({(custStats[selCustomer].kg/1000).toFixed(2)} t)</span>
-              <span>🗓 Last: {fmtDate(custStats[selCustomer].lastDate)}</span>
+          {/* Stats row */}
+          {custLedger && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[
+                { label: "Challans", val: custLedger.cs.challans || 0 },
+                { label: "Reels", val: custLedger.cs.reels || 0 },
+                { label: "Total kg", val: fmt(Math.round(custLedger.cs.kg || 0)) },
+                { label: "Revenue", val: custLedger.revenue ? fmtRs(custLedger.revenue) : "—" },
+                { label: "Profit", val: custLedger.profit ? fmtRs(custLedger.profit) : "—" },
+              ].map(s => (
+                <div key={s.label} style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 80, textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{s.label}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: s.label === "Profit" && custLedger.profit < 0 ? "#b83020" : "#1a1a1a" }}>{s.val}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Rate card - current rates + history */}
+          {custLedger && (
+            <div className="card" style={{ padding: "14px 16px" }}>
+              <h3 style={{ marginBottom: 12 }}>Rate Card — ₹/kg per grade</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0, border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+                {state.grades.map((g, gi) => {
+                  const k = `${g.bf}|${g.gsm}`;
+                  const hist = custLedger.cd?.rateHistory?.[k] || [];
+                  const currentRate = hist.length ? hist[hist.length - 1].rate : null;
+                  return (
+                    <div key={k} style={{ padding: "10px 14px", borderBottom: gi < state.grades.length - 1 ? "1px solid #f5f0e8" : "none", display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{g.bf} BF {g.gsm} GSM <span className="tag" style={{ fontSize: 10, textTransform: "capitalize", marginLeft: 4 }}>{g.shade}</span></div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: currentRate ? "#1a1a1a" : "#b0a898" }}>{currentRate ? fmtRs(currentRate) + "/kg" : "Not set"}</div>
+                      {hist.length > 1 && (
+                        <div style={{ fontSize: 10, color: "#6b5a2e" }}>
+                          {hist.slice(-3).reverse().slice(1).map((h, i) => (
+                            <div key={i}>{fmtRs(h.rate)}/kg from {fmtDate(h.from)}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {custLedger.cs.sizes && (
+                <div style={{ marginTop: 12, fontSize: 12, color: "#6b5a2e" }}>
+                  Top sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,4).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1385,7 +1711,7 @@ function HistoryTab({ state, update }) {
             <label className="lbl">Size</label>
             <select value={filterSize} onChange={e => setFilterSize(e.target.value)}>
               <option value="">All</option>
-              {SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+              {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 110 }}>
@@ -1423,7 +1749,7 @@ function HistoryTab({ state, update }) {
               bySizeInChallan[r.size].push(r);
             });
             return (
-              <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #f3ede4" : "none" }}>
+              <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 {/* Challan header */}
                 <div onClick={() => !isEditing && setOpenChallan(prev => prev === key ? null : key)}
                   style={{ padding: "12px 16px", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
@@ -1449,12 +1775,12 @@ function HistoryTab({ state, update }) {
                       {Object.keys(bySizeInChallan).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 4}</span>}
                     </div>
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
 
                 {/* Expanded content */}
                 {isOpen && (
-                  <div style={{ background: "#faf8f4", borderTop: "1px solid #f0ebe0", padding: "14px 18px 18px 18px" }}>
+                  <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "14px 18px 18px 18px" }}>
 
                     {/* Edit form */}
                     {isEditing ? (
@@ -1526,7 +1852,7 @@ function HistoryTab({ state, update }) {
                                 onChange={e => setAddReelFilter(f => ({ ...f, size: e.target.value }))}
                                 style={{ fontSize: 12 }}>
                                 <option value="">All sizes</option>
-                                {SIZE_OPTIONS.map(o => <option key={o}>{o}"</option>)}
+                                {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
                               </select>
                             </div>
                           </div>
@@ -1568,31 +1894,68 @@ function HistoryTab({ state, update }) {
                       </div>
                     )}
 
-                    {/* Sizes + weights */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {Object.entries(bySizeInChallan).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => (
-                        <div key={sz} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                          <div style={{ minWidth: 52, flexShrink: 0 }}>
-                            <span className="serif" style={{ fontSize: 22, lineHeight: 1, color: "#1a1a1a" }}>{sz}"</span>
-                          </div>
-                          <span className="tag" style={{ flexShrink: 0 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
-                          <div style={{ flex: 1, display: "flex", flexWrap: "wrap", gap: 5 }}>
-                            {reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r) => (
-                              <span key={r.id} style={{ background: "#fef0ee", border: "1px solid #f0c0ba", borderRadius: 5, padding: "3px 9px", fontSize: 12, color: "#9a4030", fontWeight: 500 }}>
-                                {fmt(r.weight)} kg
-                              </span>
-                            ))}
-                          </div>
-                          <div style={{ fontSize: 12, color: "#9a9080", flexShrink: 0 }}>
-                            {fmt(reels.reduce((s, r) => s + Number(r.weight), 0))} kg
+                    {/* Sizes + weights grouped by grade with editable rate */}
+                    {(() => {
+                      const byGrade = {};
+                      ch.reels.forEach(r => {
+                        const k = `${r.bf}|${r.gsm}`;
+                        if (!byGrade[k]) byGrade[k] = { bf: r.bf, gsm: r.gsm, reels: [], rate: r.soldRate || "" };
+                        byGrade[k].reels.push(r);
+                        if (r.soldRate && !byGrade[k].rate) byGrade[k].rate = r.soldRate;
+                      });
+                      const challanVal = Object.values(byGrade).reduce((s, g) => {
+                        const kg = g.reels.reduce((ss, r) => ss + Number(r.weight), 0);
+                        return s + (Number(g.rate) || 0) * kg;
+                      }, 0);
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {Object.entries(byGrade).sort((a, b) => a[0].localeCompare(b[0])).map(([gk, gd]) => {
+                            const gradeKg = gd.reels.reduce((s, r) => s + Number(r.weight), 0);
+                            const gradeVal = (Number(gd.rate) || 0) * gradeKg;
+                            return (
+                              <div key={gk} style={{ background: "#faf8f4", borderRadius: 10, padding: "10px 12px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                                  <span className="tag">{gd.bf} BF · {gd.gsm} GSM</span>
+                                  <span style={{ fontSize: 12, color: "#6b5a2e" }}>{fmt(Math.round(gradeKg))} kg</span>
+                                  <div style={{ flex: 1 }} />
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <input
+                                      type="number" inputMode="numeric"
+                                      value={gd.rate}
+                                      placeholder="₹/kg"
+                                      onChange={e => {
+                                        const newRate = e.target.value;
+                                        update(s => {
+                                          s.stock = s.stock.map(r =>
+                                            gd.reels.some(x => x.id === r.id) ? { ...r, soldRate: newRate ? Number(newRate) : undefined } : r
+                                          );
+                                        });
+                                      }}
+                                      style={{ width: 80, padding: "4px 8px", fontSize: 12 }}
+                                    />
+                                    <span style={{ fontSize: 11, color: "#6b5a2e" }}>/kg</span>
+                                    {gradeVal > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#1a1a1a" }}>{fmtRs(gradeVal)}</span>}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                                  {gd.reels.sort((a, b) => Number(a.size) - Number(b.size) || Number(a.weight) - Number(b.weight)).map(r => (
+                                    <span key={r.id} style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 5, padding: "3px 9px", fontSize: 12, color: "#6b5a2e", fontWeight: 500 }}>
+                                      {r.size}" · {fmt(r.weight)} kg
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div style={{ paddingTop: 10, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                            <span style={{ color: "#9a9080" }}>{ch.reels.length} reels · {fmt(Math.round(totalWt))} kg</span>
+                            <span style={{ fontWeight: 700, color: "#1a1a1a", fontSize: 15 }}>
+                              {challanVal > 0 ? fmtRs(challanVal) : <span style={{ color: "#b0a898", fontStyle: "italic", fontSize: 12 }}>Add ₹/kg to see total</span>}
+                            </span>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "flex-end", gap: 20, fontSize: 13 }}>
-                      <span style={{ color: "#9a9080" }}>{ch.reels.length} reels</span>
-                      <span style={{ fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg total</span>
-                    </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -1686,8 +2049,10 @@ function ReportsTab({ state }) {
   const custMap = {};
   periodSold.forEach(r => {
     const c = r.soldTo || "Unknown";
-    if (!custMap[c]) custMap[c] = { reels: 0, kg: 0, sizes: {}, grades: {} };
+    if (!custMap[c]) custMap[c] = { reels: 0, kg: 0, revenue: 0, profit: 0, sizes: {}, grades: {} };
     custMap[c].reels++; custMap[c].kg += Number(r.weight);
+    custMap[c].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
+    custMap[c].profit += ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight);
     custMap[c].sizes[r.size] = (custMap[c].sizes[r.size] || 0) + 1;
     custMap[c].grades[`${r.bf} BF ${r.gsm} GSM`] = (custMap[c].grades[`${r.bf} BF ${r.gsm} GSM`] || 0) + 1;
   });
@@ -1732,15 +2097,20 @@ function ReportsTab({ state }) {
         </div>
       </div>
       <div className="g4">
-        {[
-          { label: "Reels Sold", val: totalReels, unit: "reels" },
-          { label: "Total Weight", val: totalTons.toFixed(2), unit: "tons" },
-          { label: "Total Weight (kg)", val: fmt(Math.round(totalKg)), unit: "kilograms" },
-          { label: "Avg Reel Weight", val: avgWeight, unit: "kg per reel" },
-        ].map(s => (
+        {(() => {
+          const revenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
+          const cost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+          const profit = revenue - cost;
+          return [
+            { label: "Reels Sold", val: totalReels, unit: "reels" },
+            { label: "Total Weight", val: totalTons.toFixed(2), unit: "tons" },
+            { label: "Revenue", val: revenue ? fmtRs(revenue) : "—", unit: "selling value" },
+            { label: "Gross Profit", val: profit && revenue ? fmtRs(profit) : "—", unit: revenue ? `${((profit/revenue)*100).toFixed(1)}% margin` : "set rates to calculate" },
+          ];
+        })().map(s => (
           <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
             <div className="lbl">{s.label}</div>
-            <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
+            <div className="stat-num" style={{ fontSize: 28 }}>{s.val}</div>
             <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 3 }}>{s.unit}</div>
           </div>
         ))}
@@ -1792,7 +2162,7 @@ function ReportsTab({ state }) {
             const topGr = Object.entries(data.grades).sort((a, b) => b[1] - a[1])[0];
             const barW = top5Cust[0] ? (data.kg / top5Cust[0][1].kg) * 100 : 0;
             return (
-              <div key={name} style={{ padding: "16px 0", borderBottom: idx < top5Cust.length - 1 ? "1px solid #f3ede4" : "none" }}>
+              <div key={name} style={{ padding: "16px 0", borderBottom: idx < top5Cust.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 28, height: 28, background: CHART_COLORS[idx], borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 600 }}>{idx + 1}</div>
@@ -1801,12 +2171,13 @@ function ReportsTab({ state }) {
                       <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{data.reels} reels · {fmt(Math.round(data.kg))} kg · {(data.kg / 1000).toFixed(2)} tons</div>
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    {topSz && <div style={{ fontSize: 11 }}>Top size: <span className="serif" style={{ fontSize: 16 }}>{topSz[0]}"</span> <span style={{ color: "#9a9080" }}>({topSz[1]}×)</span></div>}
-                    {topGr && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{topGr[0]}</div>}
+              <div style={{ textAlign: "right" }}>
+                    {data.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a1a" }}>{fmtRs(data.revenue)}</div>}
+                    {data.profit !== 0 && data.revenue > 0 && <div style={{ fontSize: 11, color: data.profit >= 0 ? "#2d6a4f" : "#b83020" }}>{fmtRs(data.profit)} profit</div>}
+                    {topSz && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>Top: {topSz[0]}" ({topSz[1]}×)</div>}
                   </div>
                 </div>
-                <div style={{ background: "#f3ede4", borderRadius: 3, height: 4, overflow: "hidden" }}>
+                <div style={{ background: "#e8eef8", borderRadius: 3, height: 4, overflow: "hidden" }}>
                   <div style={{ width: `${barW}%`, height: "100%", background: CHART_COLORS[idx], borderRadius: 3, transition: "width 0.5s ease" }} />
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
@@ -1819,7 +2190,7 @@ function ReportsTab({ state }) {
           })}
         </div>
       </div>
-      <div className="card" style={{ background: "#1a1a1a", color: "#f8f7f4", border: "none" }}>
+      <div className="card" style={{ background: "#1a1a1a", color: "#f4f7fb", border: "none" }}>
         <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabelStr}</h3>
         <div className="g3">
           {[
@@ -1829,7 +2200,7 @@ function ReportsTab({ state }) {
           ].map(x => (
             <div key={x.label}>
               <div className="lbl" style={{ color: "#6a5a4a" }}>{x.label}</div>
-              <div className="serif" style={{ fontSize: 22, color: "#f8f7f4", lineHeight: 1.2 }}>{x.val}</div>
+              <div className="serif" style={{ fontSize: 22, color: "#f4f7fb", lineHeight: 1.2 }}>{x.val}</div>
               <div className="serif-italic" style={{ fontSize: 12, color: "#6a5a4a", marginTop: 4 }}>{x.sub}</div>
             </div>
           ))}
@@ -1857,7 +2228,7 @@ function SettingsTab({ state, update }) {
       <div className="card">
         <h3>Paper Grades</h3>
         {state.grades.map(g => (
-          <div key={g.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #f3ede4" }}>
+          <div key={g.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #e8eef8" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontWeight: 500 }}>{g.label}</span>
               <span className="tag" style={{ textTransform: "capitalize" }}>{g.shade}</span>
