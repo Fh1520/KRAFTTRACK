@@ -34,6 +34,7 @@ const SIZE_OPTIONS = Array.from({ length: 38 }, (_, i) => String(19 + i)); // 19
 const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {} };
 
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
+function fmtRate(n) { if (!n && n !== 0) return ""; const v = Number(n); return "₹" + (Number.isInteger(v) ? v.toString() : v.toFixed(2)); }
 function getCurrentRate(customerData, customer, bf, gsm) {
   const hist = customerData?.[customer]?.rateHistory?.[`${bf}|${gsm}`];
   if (!hist || hist.length === 0) return "";
@@ -924,7 +925,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: gr.mode === "slabs" ? 8 : 0 }}>
                   {gr.mode === "simple" ? (
-                    <input type="number" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
+                    <input type="number" step="0.01" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
                       onChange={e => setGradeRates(p => ({ ...p, [gk]: { ...gr, rate: e.target.value } }))}
                       style={{ flex: 1 }} />
                   ) : null}
@@ -941,7 +942,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                           style={{ flex: 1 }}
                           onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
                         <span style={{ fontSize: 12, color: "#6b5a2e", flexShrink: 0 }}>kg @</span>
-                        <input type="number" inputMode="numeric" value={sl.rate} placeholder="₹/kg"
+                        <input type="number" step="0.01" inputMode="numeric" value={sl.rate} placeholder="₹/kg"
                           style={{ flex: 1 }}
                           onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
                         {gr.slabs.length > 1 && <button onClick={() => setGradeRates(p => { const slabs = p[gk].slabs.filter((_, i) => i !== si); return { ...p, [gk]: { ...p[gk], slabs } }; })} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 14, cursor: "pointer" }}>✕</button>}
@@ -988,6 +989,15 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
             <div style={{ fontSize: 13, color: "#8a8070" }}>
               Total: <span className="serif" style={{ fontSize: 20, color: "#1a1a1a" }}>{fmt(totalWt)} kg</span>
               <span style={{ fontSize: 11, color: "#b0a898", marginLeft: 6 }}>({reels.length} reels)</span>
+              {(() => {
+                const shipVal = Object.entries(gradeRates).reduce((s, [gk, gr]) => {
+                  const [bf, gsm] = gk.split("|");
+                  const gradeKg = reels.filter(r => r.bf === bf && r.gsm === gsm).reduce((ss, r) => ss + Number(r.weight), 0);
+                  const rate = gr.mode === "simple" ? Number(gr.rate)||0 : computeWeightedCostRate(gr.slabs, gradeKg);
+                  return s + rate * gradeKg;
+                }, 0);
+                return shipVal > 0 ? <span style={{ display: "block", fontSize: 12, color: "#8b6914", fontWeight: 700, marginTop: 2 }}>{fmtRs(shipVal)} shipment value</span> : null;
+              })()}
             </div>
             <button className="btn btn-dark" onClick={submit} disabled={reels.length === 0 || !form.supplier}>✓ Save</button>
           </div>
@@ -1146,7 +1156,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                                 </div>
                                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: gr.mode === "slabs" ? 8 : 0 }}>
                                   {gr.mode === "simple" && (
-                                    <input type="number" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
+                                    <input type="number" step="0.01" inputMode="numeric" value={gr.rate} placeholder="₹/kg e.g. 28"
                                       onChange={e => setShipRates(p => ({ ...p, [gk]: { ...gr, rate: e.target.value } }))}
                                       style={{ flex: 1 }} />
                                   )}
@@ -1162,7 +1172,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                                         <input type="number" inputMode="numeric" value={sl.kg} placeholder="kg" style={{ flex: 1 }}
                                           onChange={e => setShipRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
                                         <span style={{ fontSize: 11, color: "#9a9080" }}>kg @</span>
-                                        <input type="number" inputMode="numeric" value={sl.rate} placeholder="₹/kg" style={{ flex: 1 }}
+                                        <input type="number" step="0.01" inputMode="numeric" value={sl.rate} placeholder="₹/kg" style={{ flex: 1 }}
                                           onChange={e => setShipRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
                                         {gr.slabs.length > 1 && <button onClick={() => setShipRates(p => { const slabs = p[gk].slabs.filter((_,i) => i !== si); return { ...p, [gk]: { ...p[gk], slabs } }; })} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 14, cursor: "pointer" }}>✕</button>}
                                       </div>
@@ -1248,7 +1258,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                                   <span className="serif" style={{ fontSize: 20 }}>{sz}"</span>
                                   <span className="tag" style={{ fontSize: 10 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
                                   <span style={{ fontSize: 11, color: "#9a9080" }}>{reels.length} reel{reels.length !== 1 ? "s" : ""}</span>
-                                  {costSet && <span style={{ fontSize: 10, color: "#2d6a4f", fontWeight: 600 }}>{fmtRs(reels[0].costRate)}/kg</span>}
+                                  {costSet && <span style={{ fontSize: 10, color: "#2d6a4f", fontWeight: 600 }}>{fmtRate(reels[0].costRate)}/kg</span>}
                                 </div>
                                 <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6050" }}>{fmt(Math.round(szTotal))} kg</span>
                               </div>
@@ -1266,7 +1276,10 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
 
                       <div style={{ borderTop: "1px solid #e8e2d8", paddingTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                         <span style={{ color: "#9a9080" }}>{sh.reels.length} reels · {availCount} available</span>
-                        <span style={{ fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg total</span>
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg total</span>
+                          {(() => { const shipVal = sh.reels.reduce((s, r) => s + (Number(r.costRate)||0)*Number(r.weight), 0); return shipVal > 0 ? <span style={{ display: "block", fontSize: 12, color: "#8b6914", fontWeight: 700 }}>{fmtRs(shipVal)} cost value</span> : null; })()}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1510,7 +1523,7 @@ function SellTab({ state, update }) {
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ minWidth: 140, fontSize: 12, fontWeight: 500 }}>{g.bf} BF {g.gsm} GSM</span>
-                  <input type="number" inputMode="numeric" value={rate} placeholder="₹/kg"
+                  <input type="number" step="0.01" inputMode="numeric" value={rate} placeholder="₹/kg"
                     onChange={e => setSellRates(p => ({ ...p, [k]: e.target.value }))}
                     style={{ width: 110 }} />
                   {selKg > 0 && rate && <span style={{ fontSize: 12, color: "#8b6914", fontWeight: 600 }}>{fmtRs(selKg * Number(rate))}</span>}
@@ -1887,7 +1900,7 @@ function HistoryTab({ state, update }) {
           {/* OVERVIEW TAB — current rate card + top sizes */}
           {ledgerTab === "overview" && custLedger && (
             <div className="card" style={{ padding: "14px 16px" }}>
-              <h3 style={{ marginBottom: 12 }}>Current Rate Card</h3>
+              <h3 style={{ marginBottom: 12 }}>Current Rate Card <span style={{ fontSize: 11, color: "#9a9080", fontWeight: 400 }}>— tap a rate to edit</span></h3>
               <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
                 {state.grades.map((g, gi) => {
                   const k = `${g.bf}|${g.gsm}`;
@@ -1895,10 +1908,27 @@ function HistoryTab({ state, update }) {
                   const currentRate = hist.length ? hist[hist.length - 1].rate : null;
                   const gradeRev = custLedger.custChallans.reduce((s, ch) => s + ch.reels.filter(r => r.bf === g.bf && r.gsm === g.gsm).reduce((ss, r) => ss + (Number(r.soldRate)||0)*Number(r.weight), 0), 0);
                   return (
-                    <div key={k} style={{ padding: "11px 14px", borderBottom: gi < state.grades.length - 1 ? "1px solid #f5f0e8" : "none", display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{g.bf} BF {g.gsm} GSM</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: currentRate ? "#1a1a1a" : "#b0a898" }}>{currentRate ? fmtRs(currentRate) + "/kg" : "Not set"}</div>
-                      {gradeRev > 0 && <div style={{ fontSize: 11, color: "#6b5a2e" }}>{fmtRs(gradeRev)}</div>}
+                    <div key={k} style={{ padding: "11px 14px", borderBottom: gi < state.grades.length - 1 ? "1px solid #f5f0e8" : "none", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 500, minWidth: 120 }}>{g.bf} BF {g.gsm} GSM</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input type="number" step="0.01" inputMode="decimal"
+                          defaultValue={currentRate || ""}
+                          placeholder="₹/kg"
+                          onBlur={e => {
+                            const newRate = parseFloat(e.target.value);
+                            if (!e.target.value || isNaN(newRate)) return;
+                            if (newRate === currentRate) return;
+                            update(s => {
+                              if (!s.customerData) s.customerData = {};
+                              if (!s.customerData[selCustomer]) s.customerData[selCustomer] = { rateHistory: {} };
+                              const h = s.customerData[selCustomer].rateHistory[k] || [];
+                              s.customerData[selCustomer].rateHistory[k] = [...h, { rate: newRate, from: today() }];
+                            });
+                          }}
+                          style={{ width: 90, padding: "5px 8px", fontSize: 13, fontWeight: 600 }} />
+                        <span style={{ fontSize: 11, color: "#9a9080" }}>/kg</span>
+                        {gradeRev > 0 && <span style={{ fontSize: 11, color: "#6b5a2e", marginLeft: 4 }}>{fmtRs(gradeRev)}</span>}
+                      </div>
                     </div>
                   );
                 })}
@@ -1927,7 +1957,7 @@ function HistoryTab({ state, update }) {
                 </div>
                 <div>
                   <label className="lbl">Rate (₹/kg)</label>
-                  <input type="number" inputMode="numeric" value={bulkForm.rate} placeholder="e.g. 42"
+                  <input type="number" step="0.01" inputMode="numeric" value={bulkForm.rate} placeholder="e.g. 42"
                     onChange={e => { setBulkForm(f => ({...f, rate: e.target.value})); setBulkPreview(null); setBulkDone(false); }} />
                 </div>
                 <div>
@@ -1996,7 +2026,7 @@ function HistoryTab({ state, update }) {
                           <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 14px", borderTop: "1px solid #f5f0e8", background: i === 0 ? "#fdf9f0" : "#fff" }}>
                             <span style={{ fontSize: 12 }}>{fmtDate(h.from)}</span>
                             <span style={{ fontSize: 12, color: "#9a9080" }}>{i === 0 ? "Current" : fmtDate(h.toDisplay)}</span>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: "#8b6914", textAlign: "right" }}>{fmtRs(h.rate)}/kg</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#8b6914", textAlign: "right" }}>{fmtRate(h.rate)}/kg</span>
                           </div>
                         ))}
                       </div>
@@ -2086,12 +2116,13 @@ function HistoryTab({ state, update }) {
                       </span>
                       <span className="tag tag-red" style={{ fontSize: 11, flexShrink: 0 }}>{ch.reels.length} reel{ch.reels.length !== 1 ? "s" : ""}</span>
                     </div>
-                    {/* Line 2: date · challan no · kg · size tags */}
+                    {/* Line 2: date · challan no · kg · value · size tags */}
                     <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 11, color: "#9a9080", fontWeight: 500 }}>{fmtDate(ch.date)}</span>
                       {ch.challanNo && <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#9a9080" }}>Ch {ch.challanNo}</span></>}
                       <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
                       <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
+                      {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span></> : null; })()}
                       {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 4).map(sz => (
                         <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}"</span>
                       ))}
