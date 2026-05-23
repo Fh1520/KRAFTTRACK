@@ -2407,6 +2407,7 @@ function ReportsTab({ state }) {
           </div>
         );
       })()}
+      <div className="g4">
         {(() => {
           const revenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
           const cost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
