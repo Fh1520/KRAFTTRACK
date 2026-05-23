@@ -151,18 +151,22 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
   );
 }
 
-// ─── KRAFTTRACK LOGO ──────────────────────────────────────────────────────────
+// ─── PRIMESTOCK LOGO ──────────────────────────────────────────────────────────
 function KraftReelIcon({ size = 30 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
       <rect width="30" height="30" rx="7" fill="#1a1a1a"/>
-      <circle cx="15" cy="15" r="10" fill="#7a4f1e"/>
-      <circle cx="15" cy="15" r="8.5" fill="none" stroke="#9b6a2e" strokeWidth="1.2"/>
-      <circle cx="15" cy="15" r="7" fill="none" stroke="#b07f3a" strokeWidth="1.2"/>
-      <circle cx="15" cy="15" r="5.5" fill="none" stroke="#9b6a2e" strokeWidth="1"/>
-      <circle cx="15" cy="15" r="4" fill="#c49a45"/>
-      <circle cx="15" cy="15" r="2.2" fill="#1a1a1a"/>
-      <circle cx="14.2" cy="14.2" r="0.6" fill="#3a3a3a"/>
+      <ellipse cx="9" cy="15" rx="3" ry="8" fill="#7a4f1e"/>
+      <ellipse cx="21" cy="15" rx="3" ry="8" fill="#7a4f1e"/>
+      <rect x="9" y="7" width="12" height="16" fill="#9b6a2e"/>
+      <rect x="9" y="8.5" width="12" height="1.5" fill="#5a8be0" opacity="0.7"/>
+      <rect x="9" y="11" width="12" height="1.5" fill="#5a8be0" opacity="0.6"/>
+      <rect x="9" y="13.5" width="12" height="1.5" fill="#5a8be0" opacity="0.7"/>
+      <rect x="9" y="16" width="12" height="1.5" fill="#5a8be0" opacity="0.6"/>
+      <rect x="9" y="18.5" width="12" height="1.5" fill="#5a8be0" opacity="0.7"/>
+      <ellipse cx="9" cy="15" rx="1.4" ry="3.5" fill="#1a1a1a"/>
+      <ellipse cx="21" cy="15" rx="1.4" ry="3.5" fill="#1a1a1a"/>
+      <ellipse cx="20" cy="10" rx="1" ry="0.5" fill="#c49a45" opacity="0.5"/>
     </svg>
   );
 }
@@ -176,14 +180,15 @@ export default function App() {
   const [lastSaved, setLastSaved] = useState(null);
   const [saveError, setSaveError] = useState(false);
   const saveTimer = useRef(null);
+  const hasPendingSave = useRef(false);
   const isRemoteUpdate = useRef(false);
 
-  // ── Real-time listener — fires whenever Firebase data changes ──
+  // ── Real-time listener — only apply remote updates when no local save is pending ──
   useEffect(() => {
     const dataRef = ref(db, DATA_REF);
     const unsub = onValue(dataRef, (snapshot) => {
       const data = snapshot.val();
-      if (data) {
+      if (data && !hasPendingSave.current) {
         isRemoteUpdate.current = true;
         setState({ ...INITIAL_STATE, ...data });
       }
@@ -200,13 +205,20 @@ export default function App() {
     setState(prev => {
       const next = JSON.parse(JSON.stringify(prev));
       fn(next);
-      // Debounce writes — 600ms after last keystroke
+      hasPendingSave.current = true;
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         cloudSave(next)
-          .then(() => { setLastSaved(new Date()); setSaveError(false); })
-          .catch(() => setSaveError(true));
-      }, 600);
+          .then(() => {
+            hasPendingSave.current = false;
+            setLastSaved(new Date());
+            setSaveError(false);
+          })
+          .catch(() => {
+            hasPendingSave.current = false;
+            setSaveError(true);
+          });
+      }, 300);
       return next;
     });
   }, []);
@@ -233,7 +245,7 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
         body{background:#f4f7fb}
-        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#edeae4}::-webkit-scrollbar-thumb{background:#a0b8d8;border-radius:2px}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#edeae4}::-webkit-scrollbar-thumb{background:#c8b89a;border-radius:2px}
         input,select,textarea{background:#fff!important;border:1.5px solid #ddd8ce!important;color:#1a1a1a!important;padding:9px 12px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;width:100%;transition:all 0.15s;resize:vertical}
         input:focus,select:focus,textarea:focus{border-color:#8b6914!important;box-shadow:0 0 0 3px rgba(139,105,20,0.07)}
         select option{background:#fff;color:#1a1a1a}
@@ -588,7 +600,7 @@ function SizeInwardHistory({ sz, inwardGroups }) {
                     {soldCount > 0 && <span className="tag tag-red" style={{ fontSize: 10 }}>{soldCount} sold</span>}
                     <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
                   </div>
-                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
                 {isOpen && (
                   <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "12px 16px" }}>
@@ -642,7 +654,7 @@ function SizeOutwardHistory({ sz, challanList }) {
                     <span className="tag tag-red" style={{ fontSize: 11 }}>{ch.reels.length} reel{ch.reels.length !== 1 ? "s" : ""}</span>
                     <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
                   </div>
-                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
                 {isOpen && (
                   <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "12px 16px" }}>
@@ -665,128 +677,6 @@ function SizeOutwardHistory({ sz, challanList }) {
 }
 
 // ─── BULK IMPORT ─────────────────────────────────────────────────────────────
-function BulkImportView({ state, update, onBack }) {
-  const [rows, setRows] = useState([]);
-  const [status, setStatus] = useState("idle"); // idle | preview | importing | done | error
-  const [errMsg, setErrMsg] = useState("");
-  const fileRef = useRef(null);
-
-  const VALID_SHADES = ["golden", "natural"];
-
-  const handleFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        // Parse xlsx using SheetJS loaded via CDN — use raw binary
-        const data = evt.target.result;
-        // Manual CSV fallback — parse as ArrayBuffer using a simple approach
-        // We'll use the xlsx library imported at top
-        import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs').then(XLSX => {
-          const wb = XLSX.read(data, { type: "array" });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
-          const valid = [];
-          const errors = [];
-          json.forEach((row, i) => {
-            const bf = String(row.bf || "").trim();
-            const gsm = String(row.gsm || "").trim();
-            const shade = String(row.shade || "").trim().toLowerCase();
-            const size = String(row.size || "").trim();
-            const weight = String(row.weight || "").trim();
-            if (!bf && !gsm && !shade && !size && !weight) return; // skip empty
-            if (!bf || !gsm || !shade || !size || !weight) { errors.push(`Row ${i+2}: missing fields`); return; }
-            if (!VALID_SHADES.includes(shade)) { errors.push(`Row ${i+2}: shade must be 'golden' or 'natural'`); return; }
-            if (isNaN(Number(weight)) || Number(weight) <= 0) { errors.push(`Row ${i+2}: invalid weight`); return; }
-            valid.push({ bf, gsm, shade, size, weight: String(weight) });
-          });
-          if (errors.length > 0) { setErrMsg(errors.slice(0,5).join("\n") + (errors.length > 5 ? `\n...and ${errors.length-5} more` : "")); setStatus("error"); return; }
-          if (valid.length === 0) { setErrMsg("No valid rows found. Check your file."); setStatus("error"); return; }
-          setRows(valid);
-          setStatus("preview");
-        });
-      } catch(e) { setErrMsg("Could not read file: " + e.message); setStatus("error"); }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const doImport = () => {
-    setStatus("importing");
-    const now = today();
-    const newReels = rows.map(r => ({
-      id: genId(), sold: false,
-      bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size, weight: r.weight,
-      supplier: "Opening Stock", invoiceNo: "BULK-IMPORT", inwardDate: now,
-    }));
-    update(s => { s.stock = [...s.stock, ...newReels]; });
-    setTimeout(() => setStatus("done"), 800);
-  };
-
-  // Group preview by grade
-  const byGrade = {};
-  rows.forEach(r => {
-    const k = `${r.bf} BF ${r.gsm} GSM ${r.shade}`;
-    if (!byGrade[k]) byGrade[k] = { reels: 0, sizes: {} };
-    byGrade[k].reels++;
-    byGrade[k].sizes[r.size] = (byGrade[k].sizes[r.size] || 0) + 1;
-  });
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button className="btn btn-outline btn-sm" onClick={onBack}>← Back</button>
-        <div><div className="section-eyebrow">Import</div><h2>Bulk Stock Import</h2></div>
-      </div>
-
-      {status === "done" ? (
-        <div className="card" style={{ textAlign: "center", padding: 52 }}>
-          <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
-          <div className="serif" style={{ fontSize: 28 }}>Import Complete</div>
-          <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{rows.length} reels added to stock.</div>
-          <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={onBack}>Go to Stock</button>
-        </div>
-      ) : (
-        <>
-          <div className="card">
-            <h3>Upload your filled Excel file</h3>
-            <p style={{ fontSize: 13, color: "#6a6050", marginBottom: 14, lineHeight: 1.7 }}>
-              Columns required: <strong>bf · gsm · shade · size · weight</strong><br/>
-              All reels will be imported as Opening Stock dated today.
-            </p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ marginBottom: 12 }} />
-            {status === "error" && (
-              <div className="err-box" style={{ whiteSpace: "pre-line", marginTop: 8 }}>{errMsg}</div>
-            )}
-          </div>
-
-          {status === "preview" && (
-            <div className="card">
-              <h3>Preview — {rows.length} reels found</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-                {Object.entries(byGrade).map(([grade, data]) => (
-                  <div key={grade} style={{ background: "#faf8f4", borderRadius: 10, padding: "12px 16px" }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>{grade} — {data.reels} reels</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {Object.entries(data.sizes).sort((a,b) => Number(a[0])-Number(b[0])).map(([sz, cnt]) => (
-                        <span key={sz} className="tag" style={{ fontSize: 11 }}>{sz}" × {cnt}</span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button className="btn btn-dark" style={{ width: "100%", justifyContent: "center", fontSize: 15, padding: "12px" }}
-                onClick={doImport} disabled={status === "importing"}>
-                {status === "importing" ? "Importing…" : `✓ Import All ${rows.length} Reels`}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
 // ─── STOCK (INWARD) ───────────────────────────────────────────────────────────
 function StockTab({ state, update, stockNav, clearStockNav }) {
   const [view, setView] = useState("list");
@@ -921,7 +811,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
               <div key={gk} style={{ marginBottom: 14, padding: "12px 14px", background: "#faf8f4", borderRadius: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ fontWeight: 600, fontSize: 13 }}>{gradeLabel}</span>
-                  <span style={{ fontSize: 11, color: "#6b5a2e" }}>{fmt(Math.round(gradeKg))} kg</span>
+                  <span style={{ fontSize: 11, color: "#8b6914" }}>{fmt(Math.round(gradeKg))} kg</span>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: gr.mode === "slabs" ? 8 : 0 }}>
                   {gr.mode === "simple" ? (
@@ -941,7 +831,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                         <input type="number" inputMode="numeric" value={sl.kg} placeholder="kg"
                           style={{ flex: 1 }}
                           onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
-                        <span style={{ fontSize: 12, color: "#6b5a2e", flexShrink: 0 }}>kg @</span>
+                        <span style={{ fontSize: 12, color: "#8b6914", flexShrink: 0 }}>kg @</span>
                         <input type="number" step="0.01" inputMode="numeric" value={sl.rate} placeholder="₹/kg"
                           style={{ flex: 1 }}
                           onChange={e => setGradeRates(p => { const slabs = [...p[gk].slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, [gk]: { ...p[gk], slabs } }; })} />
@@ -952,7 +842,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                       onClick={() => setGradeRates(p => ({ ...p, [gk]: { ...p[gk], slabs: [...p[gk].slabs, { kg: "", rate: "" }] } }))}>
                       + Add slab
                     </button>
-                    <div style={{ fontSize: 11, color: "#6b5a2e", fontStyle: "italic" }}>Remaining kg auto-assigned to last slab rate</div>
+                    <div style={{ fontSize: 11, color: "#8b6914", fontStyle: "italic" }}>Remaining kg auto-assigned to last slab rate</div>
                   </div>
                 )}
               </div>
@@ -1100,6 +990,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                         <span style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1a" }}>{sh.supplier}</span>
                         <span className="tag tag-green" style={{ fontSize: 10 }}>{sh.reels.length} reels</span>
                         {availCount < sh.reels.length && <span className="tag tag-red" style={{ fontSize: 10 }}>{sh.reels.length - availCount} sold</span>}
+                        {sh.reels.some(r => !r.costRate) && <span style={{ fontSize: 10, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 4, padding: "1px 6px", color: "#a05800", fontWeight: 600 }}>⚠ no cost rate</span>}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                         <span style={{ fontSize: 11, color: "#9a9080", fontWeight: 500 }}>{fmtDate(sh.date)}</span>
@@ -1112,7 +1003,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                         {Object.keys(bySizeInShip).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInShip).length - 4}</span>}
                       </div>
                     </div>
-                    <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                    <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                   </div>
                   {isOpen && (
                     <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1215,7 +1106,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
 
                       {/* Weight edit panel */}
                       {editWeightKey === key && (
-                        <div style={{ background: "#fff", border: "1.5px solid #dde5f0", borderRadius: 10, padding: "14px 16px" }}>
+                        <div style={{ background: "#fff", border: "1.5px solid #e8e2d8", borderRadius: 10, padding: "14px 16px" }}>
                           <div style={{ fontSize: 11, fontWeight: 600, color: "#6a6050", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Reel Weights</div>
                           {Object.entries(bySizeInShip).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, reels]) => (
                             <div key={sz} style={{ marginBottom: 14 }}>
@@ -1225,7 +1116,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                               </div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                                 {reels.map((r, i) => (
-                                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 5, background: "#f4f7fb", border: "1px solid #dde5f0", borderRadius: 7, padding: "5px 8px" }}>
+                                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 5, background: "#f4f7fb", border: "1px solid #e8e2d8", borderRadius: 7, padding: "5px 8px" }}>
                                     <span style={{ fontSize: 10, color: "#b0a898" }}>#{i+1}</span>
                                     <input type="number" inputMode="numeric" defaultValue={r.weight}
                                       onBlur={e => {
@@ -1293,8 +1184,6 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
   }
 
   // ── BULK IMPORT VIEW ──
-  if (view === "import") {
-    return <BulkImportView state={state} update={update} onBack={() => setView("list")} />;
   }
 
   // ── LIST VIEW ──
@@ -1321,7 +1210,6 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
         <div><div className="section-eyebrow">Inventory</div><h2>Stock Register</h2></div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("inward")}>📋 Inward History</button>
-          <button className="btn btn-outline" onClick={() => setView("import")} style={{ borderColor: "#8b6914", color: "#8b6914" }}>📥 Bulk Import</button>
           <button className="btn btn-dark" onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
         </div>
       </div>
@@ -1386,7 +1274,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
                     {isModerate && <span className="tag tag-blue" style={{ fontSize: 10 }}>3 left</span>}
                     {filter.showSold && grp.soldReels.length > 0 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{grp.soldReels.length} sold</span>}
                   </div>
-                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0 }}>›</div>
+                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0 }}>›</div>
                 </div>
                 {/* Line 2: weight chips (capped at 6) + total */}
                 {grp.reels.length > 0 && (
@@ -1758,7 +1646,7 @@ function HistoryTab({ state, update }) {
                     <div style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{(cs.kg / 1000).toFixed(2)} t</div>
                     <div style={{ fontSize: 10, color: "#b0a898", marginTop: 2 }}>Last: {fmtDate(cs.lastDate)}</div>
                   </div>
-                  <div style={{ color: "#a0b8d8", fontSize: 16 }}>›</div>
+                  <div style={{ color: "#c8b89a", fontSize: 16 }}>›</div>
                 </div>
               </div>
             );
@@ -1880,7 +1768,7 @@ function HistoryTab({ state, update }) {
                 { label: "Profit", val: custLedger.profit ? fmtRs(custLedger.profit) : "—" },
               ].map(s => (
                 <div key={s.label} style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 80, textAlign: "center" }}>
-                  <div style={{ fontSize: 10, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{s.label}</div>
+                  <div style={{ fontSize: 10, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{s.label}</div>
                   <div style={{ fontWeight: 700, fontSize: 15, color: s.label === "Profit" && custLedger.profit < 0 ? "#b83020" : "#1a1a1a" }}>{s.val}</div>
                 </div>
               ))}
@@ -1927,14 +1815,14 @@ function HistoryTab({ state, update }) {
                           }}
                           style={{ width: 90, padding: "5px 8px", fontSize: 13, fontWeight: 600 }} />
                         <span style={{ fontSize: 11, color: "#9a9080" }}>/kg</span>
-                        {gradeRev > 0 && <span style={{ fontSize: 11, color: "#6b5a2e", marginLeft: 4 }}>{fmtRs(gradeRev)}</span>}
+                        {gradeRev > 0 && <span style={{ fontSize: 11, color: "#8b6914", marginLeft: 4 }}>{fmtRs(gradeRev)}</span>}
                       </div>
                     </div>
                   );
                 })}
               </div>
               {custLedger.cs.sizes && (
-                <div style={{ marginTop: 12, fontSize: 12, color: "#6b5a2e" }}>
+                <div style={{ marginTop: 12, fontSize: 12, color: "#8b6914" }}>
                   Top sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,5).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
                 </div>
               )}
@@ -2018,9 +1906,9 @@ function HistoryTab({ state, update }) {
                     ) : (
                       <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: "#f5f0e8", padding: "8px 14px" }}>
-                          <span style={{ fontSize: 10, fontWeight: 600, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em" }}>From</span>
-                          <span style={{ fontSize: 10, fontWeight: 600, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em" }}>To</span>
-                          <span style={{ fontSize: 10, fontWeight: 600, color: "#6b5a2e", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "right" }}>Rate</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em" }}>From</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em" }}>To</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "right" }}>Rate</span>
                         </div>
                         {withRanges.reverse().map((h, i) => (
                           <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 14px", borderTop: "1px solid #f5f0e8", background: i === 0 ? "#fdf9f0" : "#fff" }}>
@@ -2122,14 +2010,14 @@ function HistoryTab({ state, update }) {
                       {ch.challanNo && <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#9a9080" }}>Ch {ch.challanNo}</span></>}
                       <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
                       <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
-                      {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span></> : null; })()}
+                      {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span></> : <span style={{ fontSize: 10, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 4, padding: "1px 6px", color: "#a05800", fontWeight: 600 }}>⚠ no rate</span>; })()}
                       {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 4).map(sz => (
                         <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}"</span>
                       ))}
                       {Object.keys(bySizeInChallan).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 4}</span>}
                     </div>
                   </div>
-                  <div style={{ color: "#a0b8d8", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
 
                 {/* Expanded content */}
@@ -2270,7 +2158,7 @@ function HistoryTab({ state, update }) {
                               <div key={gk} style={{ background: "#faf8f4", borderRadius: 10, padding: "10px 12px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                                   <span className="tag">{gd.bf} BF · {gd.gsm} GSM</span>
-                                  <span style={{ fontSize: 12, color: "#6b5a2e" }}>{fmt(Math.round(gradeKg))} kg</span>
+                                  <span style={{ fontSize: 12, color: "#8b6914" }}>{fmt(Math.round(gradeKg))} kg</span>
                                   <div style={{ flex: 1 }} />
                                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                     <input
@@ -2287,13 +2175,13 @@ function HistoryTab({ state, update }) {
                                       }}
                                       style={{ width: 80, padding: "4px 8px", fontSize: 12 }}
                                     />
-                                    <span style={{ fontSize: 11, color: "#6b5a2e" }}>/kg</span>
+                                    <span style={{ fontSize: 11, color: "#8b6914" }}>/kg</span>
                                     {gradeVal > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#1a1a1a" }}>{fmtRs(gradeVal)}</span>}
                                   </div>
                                 </div>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                                   {gd.reels.sort((a, b) => Number(a.size) - Number(b.size) || Number(a.weight) - Number(b.weight)).map(r => (
-                                    <span key={r.id} style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 5, padding: "3px 9px", fontSize: 12, color: "#6b5a2e", fontWeight: 500 }}>
+                                    <span key={r.id} style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 5, padding: "3px 9px", fontSize: 12, color: "#8b6914", fontWeight: 500 }}>
                                       {r.size}" · {fmt(r.weight)} kg
                                     </span>
                                   ))}
@@ -2450,7 +2338,63 @@ function ReportsTab({ state }) {
           <div style={{ fontSize: 11, color: "#8b6914", fontWeight: 500 }}>{periodLabelStr}</div>
         </div>
       </div>
-      <div className="g4">
+
+      {/* ── DATA COMPLETENESS CARD ── */}
+      {(() => {
+        const allSold = state.stock.filter(r => r.sold);
+        const missingSellRate = allSold.filter(r => !r.soldRate);
+        const missingCostRate = state.stock.filter(r => !r.costRate);
+        const missingChallans = [...new Set(missingSellRate.map(r => r.soldChallanNo || `${r.soldDate}|${r.soldTo}`))];
+        const missingShipments = [...new Set(missingCostRate.map(r => r.invoiceNo || `${r.inwardDate}|${r.supplier}`))];
+        const totalEntries = [...new Set(allSold.map(r => r.soldChallanNo || `${r.soldDate}|${r.soldTo}`))].length + [...new Set(state.stock.map(r => r.invoiceNo || `${r.inwardDate}|${r.supplier}`))].length;
+        const missingCount = missingChallans.length + missingShipments.length;
+        const pct = totalEntries > 0 ? Math.round(((totalEntries - missingCount) / totalEntries) * 100) : 100;
+        if (missingCount === 0) return (
+          <div className="ok-box" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span>✓</span><span>All entries have rates set — reports are fully accurate.</span>
+          </div>
+        );
+        return (
+          <div style={{ background: "#f5f0e8", border: "1px solid #e5dece", borderRadius: 14, padding: "16px 18px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16 }}>⚠️</span>
+                <span style={{ fontWeight: 600, fontSize: 14, color: "#6b5a2e" }}>Report Incomplete — Missing Rates</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ background: "#e5dece", borderRadius: 20, height: 6, width: 100, overflow: "hidden" }}>
+                  <div style={{ background: "#8b6914", height: "100%", width: `${pct}%`, borderRadius: 20, transition: "width 0.4s" }} />
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#6b5a2e" }}>{pct}% complete</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {missingChallans.length > 0 && (
+                <div style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 160 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b5a2e", marginBottom: 4 }}>
+                    {missingChallans.length} challan{missingChallans.length !== 1 ? "s" : ""} — no sell rate
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b5a2e", lineHeight: 1.6 }}>
+                    {missingSellRate.length} reels · {fmt(Math.round(missingSellRate.reduce((s,r) => s+Number(r.weight),0)))} kg unpriced
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b5a2e", marginTop: 6, fontStyle: "italic" }}>Go to History → open challan → set ₹/kg</div>
+                </div>
+              )}
+              {missingShipments.length > 0 && (
+                <div style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 160 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b5a2e", marginBottom: 4 }}>
+                    {missingShipments.length} shipment{missingShipments.length !== 1 ? "s" : ""} — no cost rate
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b5a2e", lineHeight: 1.6 }}>
+                    {missingCostRate.length} reels · {fmt(Math.round(missingCostRate.reduce((s,r) => s+Number(r.weight),0)))} kg uncosted
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b5a2e", marginTop: 6, fontStyle: "italic" }}>Go to Stock → Inward History → set rates</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
         {(() => {
           const revenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
           const cost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
