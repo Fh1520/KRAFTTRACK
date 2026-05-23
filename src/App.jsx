@@ -187,9 +187,24 @@ export default function App() {
   useEffect(() => {
     const dataRef = ref(db, DATA_REF);
     const unsub = onValue(dataRef, (snapshot) => {
-      const data = snapshot.val();
+      let data = snapshot.val();
       if (data && !hasPendingSave.current) {
         isRemoteUpdate.current = true;
+        // One-time migration: strip quote chars from sizes stored as '36"' → '36'
+        if (data.stock) {
+          let needsFix = false;
+          const fixed = data.stock.map(r => {
+            if (r.size && String(r.size).includes('"')) {
+              needsFix = true;
+              return { ...r, size: String(r.size).replace(/"/g, '').trim() };
+            }
+            return r;
+          });
+          if (needsFix) {
+            data = { ...data, stock: fixed };
+            cloudSave(data);
+          }
+        }
         setState({ ...INITIAL_STATE, ...data });
       }
       setSyncing(false);
