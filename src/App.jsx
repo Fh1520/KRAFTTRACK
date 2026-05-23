@@ -1198,9 +1198,6 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     );
   }
 
-  // ── BULK IMPORT VIEW ──
-  }
-
   // ── LIST VIEW ──
   const available = state.stock.filter(r => !r.sold);
   const sizeGroupMap = {};
