@@ -2240,6 +2240,21 @@ function HistoryTab({ state, update }) {
 }
 
 // ─── REPORTS ─────────────────────────────────────────────────────────────────
+function weekKey(d) {
+  const dt = new Date(d); dt.setHours(0,0,0,0);
+  dt.setDate(dt.getDate() + 3 - (dt.getDay() + 6) % 7);
+  const w1 = new Date(dt.getFullYear(), 0, 4);
+  return `${dt.getFullYear()}-W${String(1 + Math.round(((dt - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7)).padStart(2,"0")}`;
+}
+function weekLabel(ws) {
+  if (!ws || !ws.includes("-W")) return ws;
+  const [yr, wk] = ws.split("-W");
+  const jan4 = new Date(Number(yr), 0, 4);
+  const w1Mon = new Date(jan4); w1Mon.setDate(jan4.getDate() - (jan4.getDay() + 6) % 7);
+  const mon = new Date(w1Mon); mon.setDate(w1Mon.getDate() + (Number(wk)-1)*7); mon.setHours(0,0,0,0);
+  const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+  return `${mon.toLocaleDateString("en-IN",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}`;
+}
 function toISOWeek(date) {
   const d = new Date(date); d.setHours(0,0,0,0);
   d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
@@ -2263,7 +2278,7 @@ function fmtWeekLabel(ws) {
 
 function ReportsTab({ state }) {
   const sold = state.stock.filter(r => r.sold && r.soldDate);
-  const [periodMode, setPeriodMode] = useState("month"); // "day" | "week" | "month" | "all"
+  const [periodMode, setPeriodMode] = useState("month");
   const [selDate,  setSelDate]  = useState(today());
   const [selWeek,  setSelWeek]  = useState(toISOWeek(new Date()));
   const [selMonth, setSelMonth] = useState(() => {
@@ -2273,9 +2288,7 @@ function ReportsTab({ state }) {
 
   const periodSold = (() => {
     if (periodMode === "all") return sold;
-    if (periodMode === "day") {
-      return sold.filter(r => r.soldDate === selDate);
-    }
+    if (periodMode === "day") return sold.filter(r => r.soldDate === selDate);
     if (periodMode === "week") {
       const [mon, sun] = weekToRange(selWeek);
       return sold.filter(r => { const d = new Date(r.soldDate); return d >= mon && d <= sun; });
@@ -2295,8 +2308,19 @@ function ReportsTab({ state }) {
   const totalReels = periodSold.length;
   const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
   const totalTons = totalKg / 1000;
+
+  // Grade map
   const gradeMap = {};
-  periodSold.forEach(r => { const k = `${r.bf} BF ${r.gsm} GSM`; if (!gradeMap[k]) gradeMap[k] = { reels: 0, kg: 0 }; gradeMap[k].reels++; gradeMap[k].kg += Number(r.weight); });
+  periodSold.forEach(r => {
+    const k = `${r.bf} BF ${r.gsm} GSM`;
+    const bk = `${r.bf}|${r.gsm}`;
+    if (!gradeMap[k]) gradeMap[k] = { key: bk, bf: r.bf, gsm: r.gsm, reels: 0, kg: 0, revenue: 0, cost: 0 };
+    gradeMap[k].reels++;
+    gradeMap[k].kg += Number(r.weight);
+    gradeMap[k].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
+    gradeMap[k].cost += (Number(r.costRate) || 0) * Number(r.weight);
+  });
+
   const sizeMap = {};
   periodSold.forEach(r => { sizeMap[r.size] = (sizeMap[r.size] || 0) + 1; });
   const topSizes = Object.entries(sizeMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
@@ -2313,9 +2337,55 @@ function ReportsTab({ state }) {
   const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
   const last6 = allMonths.slice(0, 6).reverse();
   const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0) }));
-  const avgWeight = totalReels > 0 ? (totalKg / totalReels).toFixed(0) : 0;
   const topSize = topSizes[0]?.[0] || "—";
   const showTrend = periodMode === "all" || periodMode === "month";
+
+  // ── Size × Grade cross-tab ──
+  const allGradeKeys = [...new Set(state.stock.map(r => `${r.bf}|${r.gsm}`))].sort();
+  const allSoldSizes = [...new Set(periodSold.map(r => r.size))].sort((a, b) => Number(a) - Number(b));
+  const crossTab = {}; // crossTab[size][gradeKey] = { reels, kg }
+  periodSold.forEach(r => {
+    const gk = `${r.bf}|${r.gsm}`;
+    if (!crossTab[r.size]) crossTab[r.size] = {};
+    if (!crossTab[r.size][gk]) crossTab[r.size][gk] = { reels: 0, kg: 0 };
+    crossTab[r.size][gk].reels++;
+    crossTab[r.size][gk].kg += Number(r.weight);
+  });
+  const crossGradeLabels = allGradeKeys.filter(gk => periodSold.some(r => `${r.bf}|${r.gsm}` === gk));
+  const sizeRowTotals = {}; // size -> {reels, kg}
+  allSoldSizes.forEach(sz => {
+    sizeRowTotals[sz] = { reels: 0, kg: 0 };
+    crossGradeLabels.forEach(gk => {
+      sizeRowTotals[sz].reels += crossTab[sz]?.[gk]?.reels || 0;
+      sizeRowTotals[sz].kg += crossTab[sz]?.[gk]?.kg || 0;
+    });
+  });
+  const gradeColTotals = {};
+  crossGradeLabels.forEach(gk => {
+    gradeColTotals[gk] = { reels: 0, kg: 0 };
+    allSoldSizes.forEach(sz => {
+      gradeColTotals[gk].reels += crossTab[sz]?.[gk]?.reels || 0;
+      gradeColTotals[gk].kg += crossTab[sz]?.[gk]?.kg || 0;
+    });
+  });
+  const grandTotal = { reels: periodSold.length, kg: totalKg };
+
+  // ── Turnaround time ──
+  // For each sold reel that has both inwardDate and soldDate, compute days held
+  const turnReels = sold.filter(r => r.inwardDate && r.soldDate);
+  const turnByGrade = {}; // gradeKey -> days[]
+  const turnBySize  = {}; // size -> days[]
+  turnReels.forEach(r => {
+    const days = Math.round((new Date(r.soldDate) - new Date(r.inwardDate)) / 86400000);
+    if (days < 0) return; // skip bad data
+    const gk = `${r.bf} BF ${r.gsm} GSM`;
+    if (!turnByGrade[gk]) turnByGrade[gk] = [];
+    turnByGrade[gk].push(days);
+    if (!turnBySize[r.size]) turnBySize[r.size] = [];
+    turnBySize[r.size].push(days);
+  });
+  const avg = arr => arr.length ? Math.round(arr.reduce((s, x) => s + x, 0) / arr.length) : null;
+  const med = arr => { if (!arr.length) return null; const s = [...arr].sort((a,b)=>a-b); return s[Math.floor(s.length/2)]; };
 
   if (sold.length === 0) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
@@ -2333,7 +2403,6 @@ function ReportsTab({ state }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
         <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10, minWidth: 260 }}>
-          {/* Mode tabs */}
           <div style={{ display: "flex", gap: 4 }}>
             {[["day","Day"],["week","Week"],["month","Month"],["all","All Time"]].map(([m, label]) => (
               <button key={m} onClick={() => setPeriodMode(m)}
@@ -2342,7 +2411,6 @@ function ReportsTab({ state }) {
               </button>
             ))}
           </div>
-          {/* Value picker */}
           {periodMode === "day"   && <input type="date"  value={selDate}  onChange={e => setSelDate(e.target.value)}  style={{ width: "100%" }} />}
           {periodMode === "week"  && <input type="week"  value={selWeek}  onChange={e => setSelWeek(e.target.value)}  style={{ width: "100%" }} />}
           {periodMode === "month" && <input type="month" value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ width: "100%" }} />}
@@ -2351,7 +2419,7 @@ function ReportsTab({ state }) {
         </div>
       </div>
 
-      {/* ── DATA COMPLETENESS CARD ── */}
+      {/* ── DATA COMPLETENESS ── */}
       {(() => {
         const allSold = state.stock.filter(r => r.sold);
         const missingSellRate = allSold.filter(r => !r.soldRate);
@@ -2383,23 +2451,15 @@ function ReportsTab({ state }) {
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {missingChallans.length > 0 && (
                 <div style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 160 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b5a2e", marginBottom: 4 }}>
-                    {missingChallans.length} challan{missingChallans.length !== 1 ? "s" : ""} — no sell rate
-                  </div>
-                  <div style={{ fontSize: 11, color: "#6b5a2e", lineHeight: 1.6 }}>
-                    {missingSellRate.length} reels · {fmt(Math.round(missingSellRate.reduce((s,r) => s+Number(r.weight),0)))} kg unpriced
-                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b5a2e", marginBottom: 4 }}>{missingChallans.length} challan{missingChallans.length !== 1 ? "s" : ""} — no sell rate</div>
+                  <div style={{ fontSize: 11, color: "#6b5a2e", lineHeight: 1.6 }}>{missingSellRate.length} reels · {fmt(Math.round(missingSellRate.reduce((s,r) => s+Number(r.weight),0)))} kg unpriced</div>
                   <div style={{ fontSize: 11, color: "#6b5a2e", marginTop: 6, fontStyle: "italic" }}>Go to History → open challan → set ₹/kg</div>
                 </div>
               )}
               {missingShipments.length > 0 && (
                 <div style={{ background: "#fff", border: "1px solid #e5dece", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 160 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b5a2e", marginBottom: 4 }}>
-                    {missingShipments.length} shipment{missingShipments.length !== 1 ? "s" : ""} — no cost rate
-                  </div>
-                  <div style={{ fontSize: 11, color: "#6b5a2e", lineHeight: 1.6 }}>
-                    {missingCostRate.length} reels · {fmt(Math.round(missingCostRate.reduce((s,r) => s+Number(r.weight),0)))} kg uncosted
-                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b5a2e", marginBottom: 4 }}>{missingShipments.length} shipment{missingShipments.length !== 1 ? "s" : ""} — no cost rate</div>
+                  <div style={{ fontSize: 11, color: "#6b5a2e", lineHeight: 1.6 }}>{missingCostRate.length} reels · {fmt(Math.round(missingCostRate.reduce((s,r) => s+Number(r.weight),0)))} kg uncosted</div>
                   <div style={{ fontSize: 11, color: "#6b5a2e", marginTop: 6, fontStyle: "italic" }}>Go to Stock → Inward History → set rates</div>
                 </div>
               )}
@@ -2407,6 +2467,8 @@ function ReportsTab({ state }) {
           </div>
         );
       })()}
+
+      {/* ── KEY STATS ── */}
       <div className="g4">
         {(() => {
           const revenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
@@ -2426,6 +2488,8 @@ function ReportsTab({ state }) {
           </div>
         ))}
       </div>
+
+      {/* ── TREND CHARTS ── */}
       {showTrend && trendData.length > 1 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="card">
@@ -2440,25 +2504,72 @@ function ReportsTab({ state }) {
             const hasProfData = profData.some(d => d.value !== 0);
             return (
               <>
-                {hasRevData && (
-                  <div className="card">
-                    <h3>Monthly Revenue (₹)</h3>
-                    <BarChart data={revData} color="#2d6a4f" height={100} />
-                    <div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Based on challans with selling rates set.</div>
-                  </div>
-                )}
-                {hasProfData && (
-                  <div className="card">
-                    <h3>Monthly Gross Profit (₹)</h3>
-                    <BarChart data={profData} color="#1a1a1a" height={100} />
-                    <div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Only accurate for challans with both cost and sell rates set.</div>
-                  </div>
-                )}
+                {hasRevData && <div className="card"><h3>Monthly Revenue (₹)</h3><BarChart data={revData} color="#2d6a4f" height={100} /><div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Based on challans with selling rates set.</div></div>}
+                {hasProfData && <div className="card"><h3>Monthly Gross Profit (₹)</h3><BarChart data={profData} color="#1a1a1a" height={100} /><div style={{ fontSize: 11, color: "#b0a898", marginTop: 8, fontStyle: "italic" }}>Only accurate for challans with both cost and sell rates set.</div></div>}
               </>
             );
           })()}
         </div>
       )}
+
+      {/* ── GRADE REVENUE BREAKDOWN ── */}
+      {(() => {
+        const gradeEntries = Object.entries(gradeMap).sort((a, b) => b[1].revenue - a[1].revenue);
+        const totalRev = gradeEntries.reduce((s, [, v]) => s + v.revenue, 0);
+        const totalCostAll = gradeEntries.reduce((s, [, v]) => s + v.cost, 0);
+        const maxRev = gradeEntries[0]?.[1].revenue || 1;
+        if (gradeEntries.length === 0) return null;
+        return (
+          <div className="card">
+            <h3>Revenue by Grade — {periodLabelStr}</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 0, border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden", marginBottom: 0 }}>
+              {/* Header */}
+              <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", background: "#f5f0e8", padding: "8px 14px", gap: 8 }}>
+                {["Grade","Reels","Weight","Revenue","Gross Profit"].map(h => (
+                  <span key={h} style={{ fontSize: 10, fontWeight: 600, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em" }}>{h}</span>
+                ))}
+              </div>
+              {gradeEntries.map(([label, v], gi) => {
+                const profit = v.revenue - v.cost;
+                const margin = v.revenue > 0 ? ((profit / v.revenue) * 100).toFixed(1) : null;
+                const barPct = maxRev > 0 ? (v.revenue / maxRev) * 100 : 0;
+                return (
+                  <div key={label} style={{ borderTop: "1px solid #f5f0e8" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", padding: "12px 14px", alignItems: "center", gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
+                        <div style={{ background: "#e8e2d8", borderRadius: 2, height: 3, marginTop: 5, overflow: "hidden" }}>
+                          <div style={{ width: `${barPct}%`, height: "100%", background: CHART_COLORS[gi % CHART_COLORS.length], borderRadius: 2 }} />
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13 }}>{v.reels}</div>
+                      <div style={{ fontSize: 13 }}>{(v.kg/1000).toFixed(2)} t</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: v.revenue > 0 ? "#1a1a1a" : "#b0a898" }}>
+                        {v.revenue > 0 ? fmtRs(v.revenue) : "—"}
+                        {totalRev > 0 && v.revenue > 0 && <div style={{ fontSize: 10, color: "#9a9080", fontWeight: 400 }}>{((v.revenue/totalRev)*100).toFixed(1)}% of total</div>}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: profit > 0 ? "#2d6a4f" : profit < 0 ? "#b83020" : "#b0a898" }}>
+                        {v.cost > 0 ? fmtRs(profit) : "—"}
+                        {margin && <div style={{ fontSize: 10, fontWeight: 400 }}>{margin}% margin</div>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Totals row */}
+              <div style={{ background: "#f5f0e8", borderTop: "1px solid #e8e2d8", display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", padding: "10px 14px", gap: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 12 }}>Total</span>
+                <span style={{ fontWeight: 700, fontSize: 12 }}>{periodSold.length}</span>
+                <span style={{ fontWeight: 700, fontSize: 12 }}>{(totalKg/1000).toFixed(2)} t</span>
+                <span style={{ fontWeight: 700, fontSize: 12, color: totalRev > 0 ? "#1a1a1a" : "#b0a898" }}>{totalRev > 0 ? fmtRs(totalRev) : "—"}</span>
+                <span style={{ fontWeight: 700, fontSize: 12, color: (totalRev - totalCostAll) > 0 ? "#2d6a4f" : "#b0a898" }}>{totalCostAll > 0 ? fmtRs(totalRev - totalCostAll) : "—"}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── PIE CHARTS ── */}
       <div className="g2">
         <div className="card">
           <h3>Sales by Grade</h3>
@@ -2491,12 +2602,79 @@ function ReportsTab({ state }) {
           </table>
         </div>
       </div>
+
+      {/* ── SIZE × GRADE CROSS-TAB ── */}
+      {allSoldSizes.length > 0 && crossGradeLabels.length > 0 && (
+        <div className="card" style={{ overflowX: "auto" }}>
+          <h3>Size × Grade Breakdown — Reels Sold &amp; Total Weight</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 12, minWidth: crossGradeLabels.length > 1 ? 480 : "auto" }}>
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 56 }}>Size</th>
+                  {crossGradeLabels.map(gk => {
+                    const [bf, gsm] = gk.split("|");
+                    return <th key={gk} style={{ textAlign: "center", minWidth: 90 }}>{bf} BF {gsm}</th>;
+                  })}
+                  <th style={{ textAlign: "right", minWidth: 90, color: "#1a1a1a" }}>Row Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allSoldSizes.map(sz => {
+                  const rowTotal = sizeRowTotals[sz];
+                  return (
+                    <tr key={sz}>
+                      <td><span className="serif" style={{ fontSize: 19 }}>{sz}"</span></td>
+                      {crossGradeLabels.map(gk => {
+                        const cell = crossTab[sz]?.[gk];
+                        return (
+                          <td key={gk} style={{ textAlign: "center" }}>
+                            {cell ? (
+                              <>
+                                <div style={{ fontWeight: 600, color: "#1a1a1a" }}>{cell.reels} reel{cell.reels !== 1 ? "s" : ""}</div>
+                                <div style={{ fontSize: 10, color: "#9a9080" }}>{fmt(Math.round(cell.kg))} kg</div>
+                              </>
+                            ) : <span style={{ color: "#ddd8ce", fontSize: 11 }}>—</span>}
+                          </td>
+                        );
+                      })}
+                      <td style={{ textAlign: "right" }}>
+                        <div style={{ fontWeight: 700, color: "#1a1a1a" }}>{rowTotal.reels} reels</div>
+                        <div style={{ fontSize: 10, color: "#8b6914", fontWeight: 600 }}>{fmt(Math.round(rowTotal.kg))} kg</div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "#f5f0e8" }}>
+                  <td style={{ fontWeight: 700, fontSize: 12 }}>Total</td>
+                  {crossGradeLabels.map(gk => {
+                    const col = gradeColTotals[gk];
+                    return (
+                      <td key={gk} style={{ textAlign: "center" }}>
+                        <div style={{ fontWeight: 700 }}>{col.reels}</div>
+                        <div style={{ fontSize: 10, color: "#8b6914", fontWeight: 600 }}>{fmt(Math.round(col.kg))} kg</div>
+                      </td>
+                    );
+                  })}
+                  <td style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 700 }}>{grandTotal.reels}</div>
+                    <div style={{ fontSize: 10, color: "#8b6914", fontWeight: 700 }}>{fmt(Math.round(grandTotal.kg))} kg</div>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── TOP 5 CUSTOMERS ── */}
       <div className="card">
         <h3>Top 5 Customers</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
           {top5Cust.map(([name, data], idx) => {
             const topSz = Object.entries(data.sizes).sort((a, b) => b[1] - a[1])[0];
-            const topGr = Object.entries(data.grades).sort((a, b) => b[1] - a[1])[0];
             const barW = top5Cust[0] ? (data.kg / top5Cust[0][1].kg) * 100 : 0;
             return (
               <div key={name} style={{ padding: "16px 0", borderBottom: idx < top5Cust.length - 1 ? "1px solid #e8eef8" : "none" }}>
@@ -2508,7 +2686,7 @@ function ReportsTab({ state }) {
                       <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{data.reels} reels · {fmt(Math.round(data.kg))} kg · {(data.kg / 1000).toFixed(2)} tons</div>
                     </div>
                   </div>
-              <div style={{ textAlign: "right" }}>
+                  <div style={{ textAlign: "right" }}>
                     {data.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a1a" }}>{fmtRs(data.revenue)}</div>}
                     {data.profit !== 0 && data.revenue > 0 && <div style={{ fontSize: 11, color: data.profit >= 0 ? "#2d6a4f" : "#b83020" }}>{fmtRs(data.profit)} profit</div>}
                     {topSz && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>Top: {topSz[0]}" ({topSz[1]}×)</div>}
@@ -2527,13 +2705,92 @@ function ReportsTab({ state }) {
           })}
         </div>
       </div>
+
+      {/* ── TURNAROUND TIME ── */}
+      {turnReels.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* By Grade */}
+          {Object.keys(turnByGrade).length > 0 && (
+            <div className="card">
+              <h3>Turnaround Time by Grade</h3>
+              <p style={{ fontSize: 12, color: "#9a9080", marginBottom: 14, lineHeight: 1.6 }}>Days from inward to sale. Shorter = stock moving faster.</p>
+              <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1fr", background: "#f5f0e8", padding: "8px 14px", gap: 8 }}>
+                  {["Grade","Reels","Avg Days","Median","Fastest"].map(h => (
+                    <span key={h} style={{ fontSize: 10, fontWeight: 600, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em" }}>{h}</span>
+                  ))}
+                </div>
+                {Object.entries(turnByGrade).sort((a, b) => (avg(a[1]) || 0) - (avg(b[1]) || 0)).map(([grade, days], gi, arr) => {
+                  const avgD = avg(days); const medD = med(days); const minD = Math.min(...days);
+                  const color = avgD <= 14 ? "#2d6a4f" : avgD <= 30 ? "#8b6914" : "#b83020";
+                  return (
+                    <div key={grade} style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1fr", padding: "12px 14px", gap: 8, borderTop: "1px solid #f5f0e8", alignItems: "center" }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{grade}</span>
+                      <span style={{ fontSize: 13 }}>{days.length}</span>
+                      <span style={{ fontWeight: 700, fontSize: 14, color }}>{avgD}d</span>
+                      <span style={{ fontSize: 13, color: "#6a6050" }}>{medD}d</span>
+                      <span style={{ fontSize: 13, color: "#2d6a4f", fontWeight: 600 }}>{minD}d</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {/* By Size — top 10 slowest */}
+          {Object.keys(turnBySize).length > 0 && (
+            <div className="card">
+              <h3>Turnaround Time by Size — Slowest Moving</h3>
+              <p style={{ fontSize: 12, color: "#9a9080", marginBottom: 14, lineHeight: 1.6 }}>Average days held before sale. Sizes with long turnaround may need attention.</p>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Size</th>
+                      <th>Reels</th>
+                      <th>Avg Days</th>
+                      <th>Median</th>
+                      <th>Slowest</th>
+                      <th>Fastest</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(turnBySize)
+                      .sort((a, b) => (avg(b[1]) || 0) - (avg(a[1]) || 0))
+                      .slice(0, 12)
+                      .map(([sz, days]) => {
+                        const avgD = avg(days); const medD = med(days);
+                        const maxD = Math.max(...days); const minD = Math.min(...days);
+                        const color = avgD <= 14 ? "#2d6a4f" : avgD <= 30 ? "#8b6914" : "#b83020";
+                        return (
+                          <tr key={sz}>
+                            <td><span className="serif" style={{ fontSize: 19 }}>{sz}"</span></td>
+                            <td>{days.length}</td>
+                            <td><span style={{ fontWeight: 700, color }}>{avgD}d</span></td>
+                            <td style={{ color: "#6a6050" }}>{medD}d</td>
+                            <td style={{ color: "#b83020" }}>{maxD}d</td>
+                            <td style={{ color: "#2d6a4f", fontWeight: 600 }}>{minD}d</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize: 11, color: "#b0a898", marginTop: 10, fontStyle: "italic" }}>
+                Color guide: <span style={{ color: "#2d6a4f", fontWeight: 600 }}>green</span> ≤14d · <span style={{ color: "#8b6914", fontWeight: 600 }}>amber</span> ≤30d · <span style={{ color: "#b83020", fontWeight: 600 }}>red</span> &gt;30d
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── KEY INSIGHTS ── */}
       <div className="card" style={{ background: "#1a1a1a", color: "#f4f7fb", border: "none" }}>
         <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabelStr}</h3>
         <div className="g3">
           {[
             { label: "Top Size", val: topSize + '"', sub: "most reels sold" },
             { label: "Top Customer", val: top5Cust[0]?.[0] || "—", sub: `${fmt(Math.round(top5Cust[0]?.[1].kg || 0))} kg bought` },
-            { label: "Top Grade", val: Object.entries(gradeMap).sort((a, b) => b[1].kg - a[1].kg)[0]?.[0]?.replace(" GSM", "").replace(" BF", "BF /") || "—", sub: "by weight" },
+            { label: "Top Grade", val: Object.entries(gradeMap).sort((a, b) => b[1].revenue - a[1].revenue)[0]?.[0]?.replace(" GSM","").replace(" BF","BF /") || "—", sub: "by revenue" },
           ].map(x => (
             <div key={x.label}>
               <div className="lbl" style={{ color: "#6a5a4a" }}>{x.label}</div>
