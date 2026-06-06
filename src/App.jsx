@@ -31,7 +31,12 @@ const GRADES = [
 ];
 const SHADE_OPTIONS = ["golden", "natural"];
 const SIZE_OPTIONS = Array.from({ length: 38 }, (_, i) => String(19 + i)); // 19–56
-const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {} };
+
+// Liner-specific grade options (broader BF/GSM range)
+const LINER_BF_OPTIONS = ["14", "16", "18", "20", "22", "24", "26", "28", "30", "32"];
+const LINER_GSM_OPTIONS = ["80", "90", "100", "110", "120", "130", "140", "150", "160", "170", "180", "190", "200", "210", "220"];
+
+const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [] };
 
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function fmtRate(n) { if (!n && n !== 0) return ""; const v = Number(n); return "₹" + (Number.isInteger(v) ? v.toString() : v.toFixed(2)); }
@@ -205,7 +210,7 @@ export default function App() {
             cloudSave(data);
           }
         }
-        setState({ ...INITIAL_STATE, ...data });
+        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [] });
       }
       setSyncing(false);
     }, (error) => {
@@ -238,12 +243,12 @@ export default function App() {
     });
   }, []);
 
-  const available = state.stock.filter(r => !r.sold);
+  const available = state.stock.filter(r => !r.sold && r.productType !== "liner");
   const totalKg = available.reduce((s, r) => s + Number(r.weight), 0);
 
   const sizeCountMap = {};
-  // Seed from ALL stock first so fully sold-out sizes appear with count=0
-  state.stock.forEach(r => {
+  // Seed from ALL reel stock first so fully sold-out sizes appear with count=0
+  state.stock.filter(r => r.productType !== "liner").forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
     if (!sizeCountMap[k]) sizeCountMap[k] = { count: 0, bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size };
   });
@@ -385,10 +390,10 @@ export default function App() {
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available }) {
-  const sold = state.stock.filter(r => r.sold);
+  const sold = state.stock.filter(r => r.sold && r.productType !== "liner");
   const bySpec = {};
-  // Seed all known grade+size combos so sold-out sizes show as 0
-  state.stock.forEach(r => {
+  // Seed all known grade+size combos so sold-out sizes show as 0 (reels only)
+  state.stock.filter(r => r.productType !== "liner").forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
     if (!bySpec[k]) bySpec[k] = { bf: r.bf, gsm: r.gsm, shade: r.shade, reels: 0, kg: 0, sizes: {} };
     if (bySpec[k].sizes[r.size] === undefined) bySpec[k].sizes[r.size] = 0;
@@ -694,6 +699,7 @@ function SizeOutwardHistory({ sz, challanList }) {
 // ─── BULK IMPORT ─────────────────────────────────────────────────────────────
 // ─── STOCK (INWARD) ───────────────────────────────────────────────────────────
 function StockTab({ state, update, stockNav, clearStockNav }) {
+  const [productTab, setProductTab] = useState("reels"); // "reels" | "liner"
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState({ bf: "", gsm: "", shade: "", size: "", showSold: false });
   const [openShip, setOpenShip] = useState(null);
@@ -1199,10 +1205,11 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
   }
 
   // ── LIST VIEW ──
-  const available = state.stock.filter(r => !r.sold);
+  const available = state.stock.filter(r => !r.sold && r.productType !== "liner");
+  const availableLiner = state.stock.filter(r => !r.sold && r.productType === "liner");
   const sizeGroupMap = {};
   // Always iterate ALL stock so sizes with 0 available still appear in the list
-  state.stock.forEach(r => {
+  state.stock.filter(r => r.productType !== "liner").forEach(r => {
     if (filter.bf && r.bf !== filter.bf) return;
     if (filter.gsm && r.gsm !== filter.gsm) return;
     if (filter.shade && r.shade !== filter.shade) return;
@@ -1216,8 +1223,22 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
   const totalAvailKg = available.filter(r => (!filter.bf || r.bf === filter.bf) && (!filter.gsm || r.gsm === filter.gsm)).reduce((s, r) => s + Number(r.weight), 0);
   const totalAvailReels = available.filter(r => (!filter.bf || r.bf === filter.bf) && (!filter.gsm || r.gsm === filter.gsm)).length;
 
+  // ── LINER LIST VIEW ──
+  if (productTab === "liner") {
+    return <LinerStockTab state={state} update={update} />;
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      {/* Product switcher */}
+      <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start" }}>
+        {[["reels","📦 Reels"], ["liner","📄 Liner"]].map(([t, label]) => (
+          <button key={t} onClick={() => setProductTab(t)}
+            style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: productTab === t ? "#fff" : "transparent", color: productTab === t ? "#1a1a1a" : "#8b6914", fontWeight: productTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: productTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Inventory</div><h2>Stock Register</h2></div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -1311,6 +1332,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
 
 // ─── SELL ─────────────────────────────────────────────────────────────────────
 function SellTab({ state, update }) {
+  const [productTab, setProductTab] = useState("reels"); // "reels" | "liner"
   const [customer, setCustomer] = useState("");
   const [date, setDate] = useState(today());
 
@@ -1398,6 +1420,17 @@ function SellTab({ state, update }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      {/* Product switcher */}
+      <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start" }}>
+        {[["reels","📦 Reels"], ["liner","📄 Liner"]].map(([t, label]) => (
+          <button key={t} onClick={() => setProductTab(t)}
+            style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: productTab === t ? "#fff" : "transparent", color: productTab === t ? "#1a1a1a" : "#8b6914", fontWeight: productTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: productTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {productTab === "liner" && <LinerSellTab state={state} update={update} />}
+      {productTab === "reels" && <>
       <div><div className="section-eyebrow">Dispatch</div><h2>Record a Sale</h2></div>
       <div className="card">
         <h3>Sale Details</h3>
@@ -1490,6 +1523,506 @@ function SellTab({ state, update }) {
               <div className="lbl">Selected for Sale</div>
               <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{selected.length} reels · {fmt(totalWt)} kg</div>
               {totalValue > 0 && <div style={{ fontSize: 14, color: "#8b6914", fontWeight: 700, marginTop: 4 }}>{fmtRs(totalValue)}</div>}
+              {!customer && <div style={{ fontSize: 11, color: "#b83020", marginTop: 6 }}>Enter customer name to confirm.</div>}
+            </div>
+            <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer}>✓ Confirm Sale</button>
+          </div>
+        </div>
+      )}
+      </>}
+    </div>
+  );
+}
+
+// ─── LINER STOCK TAB ─────────────────────────────────────────────────────────
+function LinerStockTab({ state, update }) {
+  const [view, setView] = useState("list"); // "list" | "convert" | "convertHistory"
+  const [converting, setConverting] = useState(null); // reel id being converted
+  const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today() });
+  const [linerWeights, setLinerWeights] = useState([]); // [{id, weight}]
+  const [newLinerWeight, setNewLinerWeight] = useState("");
+  const [convSaved, setConvSaved] = useState(false);
+
+  // Available reels (not liner, not sold)
+  const availableReels = state.stock.filter(r => !r.sold && r.productType !== "liner");
+  // Available liners
+  const availableLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
+  // All liner stock
+  const allLiners = state.stock.filter(r => r.productType === "liner");
+  // Conversion history: unique conversion batches
+  const conversionBatches = {};
+  allLiners.forEach(r => {
+    const bk = r.conversionBatchId || r.sourceReelId || r.id;
+    if (!conversionBatches[bk]) conversionBatches[bk] = { id: bk, date: r.conversionDate, corrugator: r.corrugator, labourRate: r.labourRate, sourceSpec: `${r.bf} BF ${r.gsm} GSM ${r.size}"`, liners: [] };
+    conversionBatches[bk].liners.push(r);
+  });
+
+  // GROUP available liners by spec
+  const linerGroups = {};
+  availableLiners.forEach(r => {
+    const k = `${r.bf}|${r.gsm}|${r.size}`;
+    if (!linerGroups[k]) linerGroups[k] = { bf: r.bf, gsm: r.gsm, size: r.size, liners: [] };
+    linerGroups[k].liners.push(r);
+  });
+
+  const startConvert = (reel) => {
+    setConverting(reel);
+    setConversionForm({ labourRate: "", corrugator: "", date: today() });
+    setLinerWeights([{ id: genId(), weight: "" }]);
+    setView("convert");
+  };
+
+  const addLinerRow = () => setLinerWeights(p => [...p, { id: genId(), weight: "" }]);
+  const removeLinerRow = (id) => setLinerWeights(p => p.filter(x => x.id !== id));
+  const updateLinerWeight = (id, val) => setLinerWeights(p => p.map(x => x.id === id ? { ...x, weight: val } : x));
+
+  const saveConversion = () => {
+    if (!converting || linerWeights.filter(x => x.weight).length === 0) return;
+    const batchId = genId();
+    const validLiners = linerWeights.filter(x => x.weight && !isNaN(x.weight));
+    const newLiners = validLiners.map((lw, idx) => ({
+      id: genId(),
+      productType: "liner",
+      bf: converting.bf,
+      gsm: converting.gsm,
+      size: converting.size,
+      shade: converting.shade || "golden",
+      weight: lw.weight,
+      sourceReelId: converting.id,
+      conversionBatchId: batchId,
+      conversionDate: conversionForm.date,
+      corrugator: conversionForm.corrugator,
+      labourRate: Number(conversionForm.labourRate) || 0,
+      costRate: Number(converting.costRate) || 0,
+      inwardDate: converting.inwardDate,
+      supplier: converting.supplier,
+      sold: false,
+    }));
+    update(s => {
+      // Mark source reel as converted (not sold, but flag it)
+      s.stock = s.stock.map(r => r.id === converting.id ? { ...r, converted: true, conversionBatchId: batchId, conversionDate: conversionForm.date } : r);
+      s.stock = [...s.stock, ...newLiners];
+    });
+    setConvSaved(true);
+    setView("list");
+    setTimeout(() => setConvSaved(false), 2500);
+  };
+
+  if (view === "convert" && converting) {
+    const totalLinerWt = linerWeights.filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
+    const reelWt = Number(converting.weight);
+    const diff = reelWt - totalLinerWt;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
+          <div><div className="section-eyebrow">Conversion</div><h2>Convert Reel to Liners</h2></div>
+        </div>
+        {/* Source reel info */}
+        <div className="card" style={{ background: "#faf8f4", border: "1.5px solid #e5dece" }}>
+          <h3 style={{ marginBottom: 10 }}>Source Reel</h3>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <span className="serif" style={{ fontSize: 28, color: "#1a1a1a" }}>{converting.size}"</span>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{converting.bf} BF · {converting.gsm} GSM</div>
+                <div style={{ fontSize: 12, color: "#9a9080" }}>{fmt(converting.weight)} kg · from {converting.supplier}</div>
+              </div>
+            </div>
+            {totalLinerWt > 0 && (
+              <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: diff >= 0 ? "#6a6050" : "#b83020" }}>
+                  {fmt(totalLinerWt)} kg liner output
+                </div>
+                <div style={{ fontSize: 11, color: diff >= 0 ? "#8b6914" : "#b83020" }}>
+                  {diff >= 0 ? `${fmt(Math.abs(diff).toFixed(1))} kg waste/loss` : `⚠ Exceeds reel weight by ${fmt(Math.abs(diff).toFixed(1))} kg`}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        {/* Conversion details */}
+        <div className="card">
+          <h3>Conversion Details</h3>
+          <div className="g3">
+            <div>
+              <label className="lbl">Corrugator Name</label>
+              <input value={conversionForm.corrugator} onChange={e => setConversionForm(f => ({ ...f, corrugator: e.target.value }))} placeholder="e.g. Ravi Corrugators" />
+            </div>
+            <div>
+              <label className="lbl">Labour Rate (₹/kg)</label>
+              <input type="number" inputMode="numeric" value={conversionForm.labourRate} onChange={e => setConversionForm(f => ({ ...f, labourRate: e.target.value }))} placeholder="e.g. 4" />
+            </div>
+            <div>
+              <label className="lbl">Conversion Date</label>
+              <input type="date" value={conversionForm.date} onChange={e => setConversionForm(f => ({ ...f, date: e.target.value }))} />
+            </div>
+          </div>
+        </div>
+        {/* Liner weights entry */}
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <h3 style={{ marginBottom: 0 }}>Output Liners — {linerWeights.filter(x => x.weight).length} entries</h3>
+            <span style={{ fontSize: 12, color: "#8b6914", fontWeight: 600 }}>{fmt(totalLinerWt)} kg total</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {linerWeights.map((lw, idx) => (
+              <div key={lw.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "#b0a898", minWidth: 24, textAlign: "right" }}>#{idx + 1}</span>
+                <input
+                  type="number" inputMode="numeric"
+                  value={lw.weight}
+                  onChange={e => updateLinerWeight(lw.id, e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLinerRow(); } }}
+                  placeholder="kg"
+                  style={{ width: 100 }}
+                  autoFocus={idx === linerWeights.length - 1 && idx > 0}
+                />
+                <span style={{ fontSize: 11, color: "#9a9080" }}>kg</span>
+                {linerWeights.length > 1 && (
+                  <button onClick={() => removeLinerRow(lw.id)} style={{ background: "transparent", color: "#b83020", border: "1px solid #f0c0ba", borderRadius: 4, padding: "2px 7px", fontSize: 11, cursor: "pointer" }}>✕</button>
+                )}
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={addLinerRow}>+ Add liner</button>
+          <div style={{ marginTop: 10, fontSize: 11, color: "#8a8070", fontStyle: "italic" }}>Press Enter to quickly add the next liner weight.</div>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="btn btn-dark" onClick={saveConversion} disabled={linerWeights.filter(x => x.weight).length === 0}>
+            ✓ Save Conversion — {linerWeights.filter(x => x.weight).length} liners
+          </button>
+          <button className="btn btn-outline" onClick={() => setView("list")}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Conversion history view
+  if (view === "convertHistory") {
+    const batches = Object.values(conversionBatches).sort((a, b) => new Date(b.date) - new Date(a.date));
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
+          <div><div className="section-eyebrow">Liner</div><h2>Conversion History</h2></div>
+        </div>
+        {batches.length === 0 ? (
+          <div className="card" style={{ textAlign: "center", padding: 40 }}>
+            <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No conversions recorded yet.</span>
+          </div>
+        ) : (
+          <div className="card-flat">
+            {batches.map((batch, idx) => {
+              const totalWt = batch.liners.reduce((s, r) => s + Number(r.weight), 0);
+              const soldCount = batch.liners.filter(r => r.sold).length;
+              const availCount = batch.liners.filter(r => !r.sold).length;
+              const labourCost = (batch.labourRate || 0) * totalWt;
+              return (
+                <div key={batch.id} style={{ padding: "14px 18px", borderBottom: idx < batches.length - 1 ? "1px solid #e8eef8" : "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                    <span className="serif" style={{ fontSize: 20 }}>{batch.sourceSpec}</span>
+                    <span className="tag tag-green">{batch.liners.length} liners</span>
+                    {soldCount > 0 && <span className="tag tag-red">{soldCount} sold</span>}
+                    <span style={{ fontSize: 11, color: "#9a9080", marginLeft: "auto" }}>{fmtDate(batch.date)}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, fontSize: 12, color: "#6a6050", flexWrap: "wrap" }}>
+                    {batch.corrugator && <span>📍 {batch.corrugator}</span>}
+                    {batch.labourRate > 0 && <span>Labour: {fmtRate(batch.labourRate)}/kg · {fmtRs(labourCost)} total</span>}
+                    <span>{fmt(totalWt)} kg output · {availCount} available</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+                    {batch.liners.sort((a, b) => Number(a.weight) - Number(b.weight)).map(r => (
+                      <span key={r.id} style={{ background: r.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "3px 8px", fontSize: 11, color: r.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
+                        {fmt(r.weight)} kg{r.sold ? " · sold" : ""}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Main liner list view
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      {convSaved && <div className="ok-box">✓ Conversion saved! Liners added to stock.</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
+        <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>
+        </div>
+      </div>
+
+      {/* Convert reel to liners section */}
+      {availableReels.length > 0 && (
+        <div className="card">
+          <h3 style={{ marginBottom: 12 }}>Convert Reel → Liners</h3>
+          <p style={{ fontSize: 12, color: "#8a8070", marginBottom: 12, lineHeight: 1.6 }}>Select a reel to send to a corrugator for conversion. You'll enter individual liner weights after conversion.</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {availableReels.filter(r => !r.converted).sort((a, b) => Number(a.size) - Number(b.size)).map(r => (
+              <button key={r.id}
+                onClick={() => startConvert(r)}
+                style={{ background: "#f5f0e8", border: "1.5px solid #e5dece", borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "#8b6914"; e.currentTarget.style.background = "#fdf9f0"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "#e5dece"; e.currentTarget.style.background = "#f5f0e8"; }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span className="serif" style={{ fontSize: 22 }}>{r.size}"</span>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{r.bf} BF · {r.gsm} GSM</div>
+                    <div style={{ fontSize: 11, color: "#9a9080" }}>{fmt(r.weight)} kg</div>
+                  </div>
+                  <span style={{ fontSize: 18, marginLeft: 4 }}>→</span>
+                </div>
+              </button>
+            ))}
+          </div>
+          {availableReels.filter(r => !r.converted).length === 0 && (
+            <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>All available reels have been converted or no reels in stock.</div>
+          )}
+        </div>
+      )}
+
+      {/* Liner stock by spec */}
+      {Object.keys(linerGroups).length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
+          <div className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No liner stock yet.</div>
+          <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>Convert a reel to liners to get started.</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ fontSize: 13, color: "#6a6050", fontWeight: 500 }}>
+            {availableLiners.length} liners available · {fmt(availableLiners.reduce((s, r) => s + Number(r.weight), 0))} kg
+          </div>
+          {Object.values(linerGroups).sort((a, b) => Number(a.size) - Number(b.size)).map(grp => {
+            const totalWt = grp.liners.reduce((s, r) => s + Number(r.weight), 0);
+            return (
+              <div key={`${grp.bf}|${grp.gsm}|${grp.size}`} className="card">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="serif" style={{ fontSize: 22 }}>{grp.size}"</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{grp.bf} BF · {grp.gsm} GSM</span>
+                    <span className="tag tag-green">{grp.liners.length} liner{grp.liners.length !== 1 ? "s" : ""}</span>
+                  </div>
+                  <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 600 }}>{fmt(totalWt)} kg</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {grp.liners.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r, idx) => (
+                    <EditableLinerWeight key={r.id} liner={r} idx={idx} update={update} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EDITABLE LINER WEIGHT CHIP ───────────────────────────────────────────────
+function EditableLinerWeight({ liner, idx, update }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(liner.weight));
+  const save = () => {
+    if (!val || isNaN(val)) { setEditing(false); return; }
+    update(s => { const i = s.stock.findIndex(x => x.id === liner.id); if (i !== -1) s.stock[i].weight = val; });
+    setEditing(false);
+  };
+  return (
+    <div style={{ background: "#f8f7f4", border: `1.5px solid ${editing ? "#8b6914" : "#e8e2d8"}`, borderRadius: 8, padding: "7px 10px", textAlign: "center", minWidth: 80, position: "relative" }}>
+      {editing ? (
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)}
+            style={{ width: 70, padding: "3px 6px", fontSize: 12, textAlign: "center" }}
+            autoFocus
+            onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+            onBlur={save}
+          />
+          <span style={{ fontSize: 10, color: "#9a9080" }}>kg</span>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 10, color: "#b0a898", marginBottom: 2 }}>#{idx + 1}</div>
+          <div className="serif" style={{ fontSize: 18, lineHeight: 1 }}>{fmt(liner.weight)}</div>
+          <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
+          <button onClick={() => { setEditing(true); setVal(String(liner.weight)); }}
+            style={{ background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 4, padding: "2px 6px", fontSize: 9, cursor: "pointer", marginTop: 4, display: "block", width: "100%" }}>
+            Edit
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── LINER SELL TAB ───────────────────────────────────────────────────────────
+function LinerSellTab({ state, update }) {
+  const [customer, setCustomer] = useState("");
+  const [date, setDate] = useState(today());
+  const [filter, setFilter] = useState({ bf: "", gsm: "", size: "" });
+  const [selected, setSelected] = useState([]);
+  const [sellRate, setSellRate] = useState("");
+  const [done, setDone] = useState(null);
+
+  // Shared challan sequence across reels + liner
+  const suggestedChallan = (() => {
+    const last = state.stock
+      .filter(r => r.sold && r.soldChallanNo && r.soldDate)
+      .sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate))[0]?.soldChallanNo || "";
+    if (!last) return "";
+    const m = last.match(/^(.*?)(\d+)$/);
+    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
+  })();
+  const [challanNo, setChallanNo] = useState(suggestedChallan);
+
+  const availableLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
+  const filtered = availableLiners.filter(r => {
+    if (filter.bf && r.bf !== filter.bf) return false;
+    if (filter.gsm && r.gsm !== filter.gsm) return false;
+    if (filter.size && r.size !== filter.size) return false;
+    return true;
+  }).sort((a, b) => Number(a.size) - Number(b.size) || Number(a.weight) - Number(b.weight));
+
+  const selLiners = state.stock.filter(r => selected.includes(r.id));
+  const totalWt = selLiners.reduce((s, r) => s + Number(r.weight), 0);
+  const totalValue = sellRate ? Number(sellRate) * totalWt : 0;
+  const toggleLiner = id => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+
+  // Editable weight for selected liners before confirming challan
+  const [pendingWeights, setPendingWeights] = useState({}); // id -> weight override
+  const getWeight = (r) => pendingWeights[r.id] !== undefined ? pendingWeights[r.id] : String(r.weight);
+  const effectiveWt = selLiners.reduce((s, r) => s + Number(getWeight(r)), 0);
+  const effectiveValue = sellRate ? Number(sellRate) * effectiveWt : 0;
+
+  const sell = () => {
+    if (!customer || selected.length === 0) return;
+    update(s => {
+      s.stock = s.stock.map(r => {
+        if (!selected.includes(r.id)) return r;
+        const wt = pendingWeights[r.id] !== undefined ? pendingWeights[r.id] : r.weight;
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(sellRate) || 0, weight: wt };
+      });
+      if (customer.trim() && !(s.linerCustomers || []).includes(customer.trim())) {
+        s.linerCustomers = [...(s.linerCustomers || []), customer.trim()].sort();
+      }
+    });
+    setDone({ count: selected.length, wt: effectiveWt, customer, val: effectiveValue });
+  };
+
+  if (done) return (
+    <div className="card fade-in" style={{ textAlign: "center", padding: 56 }}>
+      <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
+      <div className="serif" style={{ fontSize: 28 }}>Liner Sale Recorded</div>
+      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} liners · {fmt(done.wt)} kg{done.val ? ` · ${fmtRs(done.val)}` : ""} → {done.customer}</div>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); setSellRate(""); setPendingWeights({}); }}>Record Another Sale</button>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div><div className="section-eyebrow">Liner Dispatch</div><h2>Sell Liners</h2></div>
+
+      <div className="card">
+        <h3>Sale Details</h3>
+        <div className="g3">
+          <div>
+            <label className="lbl">Customer Name</label>
+            <CustomerInput value={customer} onChange={setCustomer} customers={state.linerCustomers || []} placeholder="Liner buyer name" />
+          </div>
+          <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+          <div>
+            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 314" />
+          </div>
+        </div>
+      </div>
+
+      {customer && (
+        <div className="card">
+          <h3>Selling Rate — ₹/kg</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <input type="number" step="0.01" inputMode="numeric" value={sellRate} onChange={e => setSellRate(e.target.value)} placeholder="e.g. 41" style={{ width: 120 }} />
+            <span style={{ fontSize: 12, color: "#9a9080" }}>per kg (applied to all liners in this challan)</span>
+            {effectiveWt > 0 && sellRate && <span style={{ fontSize: 14, fontWeight: 700, color: "#8b6914", marginLeft: "auto" }}>{fmtRs(effectiveValue)}</span>}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <h3>Select Liners to Sell</h3>
+        <div className="g3" style={{ marginBottom: 12 }}>
+          <div>
+            <label className="lbl">BF</label>
+            <select value={filter.bf} onChange={e => setFilter(f => ({ ...f, bf: e.target.value }))}>
+              <option value="">All</option>
+              {[...new Set(availableLiners.map(r => r.bf))].sort().map(b => <option key={b} value={b}>{b} BF</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="lbl">GSM</label>
+            <select value={filter.gsm} onChange={e => setFilter(f => ({ ...f, gsm: e.target.value }))}>
+              <option value="">All</option>
+              {[...new Set(availableLiners.map(r => r.gsm))].sort((a, b) => Number(a) - Number(b)).map(g => <option key={g} value={g}>{g} GSM</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="lbl">Size</label>
+            <select value={filter.size} onChange={e => setFilter(f => ({ ...f, size: e.target.value }))}>
+              <option value="">All</option>
+              {[...new Set(availableLiners.map(r => r.size))].sort((a, b) => Number(a) - Number(b)).map(s => <option key={s} value={s}>{s}"</option>)}
+            </select>
+          </div>
+        </div>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 24, color: "#b0a898" }}><span className="serif-italic">No liners available.</span></div>
+        ) : (
+          <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+            {filtered.map((r, idx) => {
+              const sel = selected.includes(r.id);
+              const pw = pendingWeights[r.id];
+              return (
+                <div key={r.id}
+                  style={{ cursor: "pointer", background: sel ? "#fdf9f0" : idx % 2 === 0 ? "#fff" : "#faf8f4", borderBottom: idx < filtered.length - 1 ? "1px solid #e8eef8" : "none", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, transition: "background 0.1s" }}>
+                  <div onClick={() => toggleLiner(r.id)} style={{ width: 20, height: 20, border: `2px solid ${sel ? "#8b6914" : "#ccc8c0"}`, borderRadius: 4, background: sel ? "#8b6914" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}>
+                    {sel && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}
+                  </div>
+                  <div style={{ flex: 1 }} onClick={() => toggleLiner(r.id)}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="serif" style={{ fontSize: 20 }}>{r.size}"</span>
+                      <span className="tag" style={{ fontSize: 10 }}>{r.bf} BF · {r.gsm} GSM</span>
+                    </div>
+                  </div>
+                  {/* Editable weight — always editable even before confirmation */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      type="number" inputMode="numeric"
+                      value={pw !== undefined ? pw : r.weight}
+                      onChange={e => setPendingWeights(p => ({ ...p, [r.id]: e.target.value }))}
+                      onClick={e => e.stopPropagation()}
+                      style={{ width: 80, padding: "4px 8px", fontSize: 13, fontWeight: 600, textAlign: "right", border: pw !== undefined ? "1.5px solid #8b6914" : "1.5px solid #ddd8ce", borderRadius: 6, background: "#fff", color: "#1a1a1a" }}
+                    />
+                    <span style={{ fontSize: 11, color: "#9a9080" }}>kg</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {selected.length > 0 && (
+        <div className="card" style={{ border: "1.5px solid #ddd8ce" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div className="lbl">Selected for Sale</div>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{selected.length} liners · {fmt(effectiveWt)} kg</div>
+              {effectiveValue > 0 && <div style={{ fontSize: 14, color: "#8b6914", fontWeight: 700, marginTop: 4 }}>{fmtRs(effectiveValue)}</div>}
               {!customer && <div style={{ fontSize: 11, color: "#b83020", marginTop: 6 }}>Enter customer name to confirm.</div>}
             </div>
             <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer}>✓ Confirm Sale</button>
@@ -2009,12 +2542,13 @@ function HistoryTab({ state, update }) {
                   onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#faf8f4"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Line 1: customer name + reels badge */}
+                    {/* Line 1: customer name + reels/liner badge */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
                       <span style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1a", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {ch.customer || "—"}
                       </span>
-                      <span className="tag tag-red" style={{ fontSize: 11, flexShrink: 0 }}>{ch.reels.length} reel{ch.reels.length !== 1 ? "s" : ""}</span>
+                      {ch.reels.some(r => r.productType === "liner") && <span className="tag" style={{ fontSize: 10, background: "#edf5ff", border: "1px solid #b0ccee", color: "#2a5a8a", flexShrink: 0 }}>📄 Liner</span>}
+                      <span className="tag tag-red" style={{ fontSize: 11, flexShrink: 0 }}>{ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</span>
                     </div>
                     {/* Line 2: date · challan no · kg · value · size tags */}
                     <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
@@ -2843,7 +3377,8 @@ function SettingsTab({ state, update }) {
         <h3>Data & Sync</h3>
         <p style={{ fontSize: 13, color: "#8a8070", lineHeight: 1.7 }}>All data saves to Firebase in real time. Any change made on one device appears instantly on all others — phones, laptops, tablets.</p>
         <div style={{ marginTop: 12, display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "#9a9080" }}>
-          <span>📦 {state.stock.length} total reels</span>
+          <span>📦 {state.stock.filter(r => r.productType !== "liner").length} reels</span>
+          <span>📄 {state.stock.filter(r => r.productType === "liner").length} liners</span>
           <span>✅ {state.stock.filter(r => r.sold).length} sold</span>
           <span>📊 {[...new Set(state.stock.filter(r => r.sold).map(r => monthKey(r.soldDate)).filter(Boolean))].length} months of data</span>
         </div>
