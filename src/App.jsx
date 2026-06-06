@@ -1536,28 +1536,25 @@ function SellTab({ state, update }) {
 
 // ─── LINER STOCK TAB ─────────────────────────────────────────────────────────
 function LinerStockTab({ state, update }) {
-  const [view, setView] = useState("list"); // "list" | "convert" | "convertHistory"
-  const [converting, setConverting] = useState(null); // reel id being converted
+  const [view, setView] = useState("list");
   const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today() });
-  const [linerWeights, setLinerWeights] = useState([]); // [{id, weight}]
-  const [newLinerWeight, setNewLinerWeight] = useState("");
+  // Multi-reel conversion: map of reelId -> [{id, weight}]
+  const [convReelWeights, setConvReelWeights] = useState({});
+  const [selectedReelIds, setSelectedReelIds] = useState([]);
+  const [convFilter, setConvFilter] = useState({ bf: "", gsm: "", size: "" });
   const [convSaved, setConvSaved] = useState(false);
 
-  // Available reels (not liner, not sold)
-  const availableReels = state.stock.filter(r => !r.sold && r.productType !== "liner");
-  // Available liners
+  const availableReels = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
   const availableLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
-  // All liner stock
   const allLiners = state.stock.filter(r => r.productType === "liner");
-  // Conversion history: unique conversion batches
+
   const conversionBatches = {};
   allLiners.forEach(r => {
-    const bk = r.conversionBatchId || r.sourceReelId || r.id;
+    const bk = r.conversionBatchId || r.id;
     if (!conversionBatches[bk]) conversionBatches[bk] = { id: bk, date: r.conversionDate, corrugator: r.corrugator, labourRate: r.labourRate, sourceSpec: `${r.bf} BF ${r.gsm} GSM ${r.size}"`, liners: [] };
     conversionBatches[bk].liners.push(r);
   });
 
-  // GROUP available liners by spec
   const linerGroups = {};
   availableLiners.forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.size}`;
@@ -1565,155 +1562,212 @@ function LinerStockTab({ state, update }) {
     linerGroups[k].liners.push(r);
   });
 
-  const startConvert = (reel) => {
-    setConverting(reel);
-    setConversionForm({ labourRate: "", corrugator: "", date: today() });
-    setLinerWeights([{ id: genId(), weight: "" }]);
-    setView("convert");
+  // Filter reels for convert view
+  const filteredReels = availableReels.filter(r => {
+    if (convFilter.bf && r.bf !== convFilter.bf) return false;
+    if (convFilter.gsm && r.gsm !== convFilter.gsm) return false;
+    if (convFilter.size && r.size !== convFilter.size) return false;
+    return true;
+  });
+
+  // Group filtered reels by size for display
+  const reelsBySize = {};
+  filteredReels.forEach(r => {
+    const k = `${r.size}|${r.bf}|${r.gsm}`;
+    if (!reelsBySize[k]) reelsBySize[k] = { size: r.size, bf: r.bf, gsm: r.gsm, reels: [] };
+    reelsBySize[k].reels.push(r);
+  });
+
+  const toggleReelSelect = (id) => {
+    setSelectedReelIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+    setConvReelWeights(p => {
+      if (p[id]) { const n = { ...p }; delete n[id]; return n; }
+      return { ...p, [id]: [{ id: genId(), weight: "" }] };
+    });
   };
 
-  const addLinerRow = () => setLinerWeights(p => [...p, { id: genId(), weight: "" }]);
-  const removeLinerRow = (id) => setLinerWeights(p => p.filter(x => x.id !== id));
-  const updateLinerWeight = (id, val) => setLinerWeights(p => p.map(x => x.id === id ? { ...x, weight: val } : x));
+  const addLinerRow = (reelId) => setConvReelWeights(p => ({ ...p, [reelId]: [...(p[reelId] || []), { id: genId(), weight: "" }] }));
+  const removeLinerRow = (reelId, lwId) => setConvReelWeights(p => ({ ...p, [reelId]: p[reelId].filter(x => x.id !== lwId) }));
+  const updateLinerWeight = (reelId, lwId, val) => setConvReelWeights(p => ({ ...p, [reelId]: p[reelId].map(x => x.id === lwId ? { ...x, weight: val } : x) }));
+
+  const totalLinersAcrossAll = Object.values(convReelWeights).flat().filter(x => x.weight).length;
 
   const saveConversion = () => {
-    if (!converting || linerWeights.filter(x => x.weight).length === 0) return;
+    if (selectedReelIds.length === 0 || totalLinersAcrossAll === 0) return;
     const batchId = genId();
-    const validLiners = linerWeights.filter(x => x.weight && !isNaN(x.weight));
-    const totalLinerOutputKg = validLiners.reduce((s, x) => s + Number(x.weight), 0);
     const labourRate = Number(conversionForm.labourRate) || 0;
-    // Total labour cost = output kg × labour rate, spread as ₹/kg on liners
-    // Paper cost rate stays the same per kg (from source reel)
-    const effectiveCostRate = (Number(converting.costRate) || 0) + labourRate;
-    const newLiners = validLiners.map((lw, idx) => ({
-      id: genId(),
-      productType: "liner",
-      bf: converting.bf,
-      gsm: converting.gsm,
-      size: converting.size,
-      shade: converting.shade || "golden",
-      weight: lw.weight,
-      sourceReelId: converting.id,
-      conversionBatchId: batchId,
-      conversionDate: conversionForm.date,
-      corrugator: conversionForm.corrugator,
-      labourRate: labourRate,
-      costRate: effectiveCostRate,  // paper cost + labour per kg
-      inwardDate: converting.inwardDate,
-      supplier: converting.supplier,
-      sold: false,
-    }));
+    const allNewLiners = [];
+    const reelIdsToMark = [];
+    selectedReelIds.forEach(reelId => {
+      const reel = state.stock.find(r => r.id === reelId);
+      if (!reel) return;
+      const validLiners = (convReelWeights[reelId] || []).filter(x => x.weight && !isNaN(x.weight));
+      if (validLiners.length === 0) return;
+      reelIdsToMark.push(reelId);
+      const effectiveCostRate = (Number(reel.costRate) || 0) + labourRate;
+      validLiners.forEach(lw => {
+        allNewLiners.push({
+          id: genId(), productType: "liner",
+          bf: reel.bf, gsm: reel.gsm, size: reel.size, shade: reel.shade || "golden",
+          weight: lw.weight, sourceReelId: reelId, conversionBatchId: batchId,
+          conversionDate: conversionForm.date, corrugator: conversionForm.corrugator,
+          labourRate, costRate: effectiveCostRate,
+          inwardDate: reel.inwardDate, supplier: reel.supplier, sold: false,
+        });
+      });
+    });
     update(s => {
-      // Mark source reel as converted (not sold, but flag it)
-      s.stock = s.stock.map(r => r.id === converting.id ? { ...r, converted: true, conversionBatchId: batchId, conversionDate: conversionForm.date } : r);
-      s.stock = [...s.stock, ...newLiners];
+      s.stock = s.stock.map(r => reelIdsToMark.includes(r.id) ? { ...r, converted: true, conversionBatchId: batchId, conversionDate: conversionForm.date } : r);
+      s.stock = [...s.stock, ...allNewLiners];
     });
     setConvSaved(true);
+    setSelectedReelIds([]);
+    setConvReelWeights({});
+    setConversionForm({ labourRate: "", corrugator: "", date: today() });
     setView("list");
     setTimeout(() => setConvSaved(false), 2500);
   };
 
-  if (view === "convert" && converting) {
-    const totalLinerWt = linerWeights.filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
-    const reelWt = Number(converting.weight);
-    const diff = reelWt - totalLinerWt;
+  // ── CONVERT VIEW ──
+  if (view === "convert") {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 100 }} className="fade-in">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
-          <div><div className="section-eyebrow">Conversion</div><h2>Convert Reel to Liners</h2></div>
+          <button className="btn btn-outline btn-sm" onClick={() => { setView("list"); setSelectedReelIds([]); setConvReelWeights({}); }}>← Back</button>
+          <div><div className="section-eyebrow">Conversion</div><h2>Convert Reels → Liners</h2></div>
         </div>
-        {/* Source reel info */}
-        <div className="card" style={{ background: "#faf8f4", border: "1.5px solid #e5dece" }}>
-          <h3 style={{ marginBottom: 10 }}>Source Reel</h3>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span className="serif" style={{ fontSize: 28, color: "#1a1a1a" }}>{converting.size}"</span>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{converting.bf} BF · {converting.gsm} GSM</div>
-                <div style={{ fontSize: 12, color: "#9a9080" }}>{fmt(converting.weight)} kg · from {converting.supplier}</div>
-              </div>
-            </div>
-            {totalLinerWt > 0 && (
-              <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: diff >= 0 ? "#6a6050" : "#b83020" }}>
-                  {fmt(totalLinerWt)} kg liner output
-                </div>
-                <div style={{ fontSize: 11, color: diff >= 0 ? "#8b6914" : "#b83020" }}>
-                  {diff >= 0 ? `${fmt(Math.abs(diff).toFixed(1))} kg waste/loss` : `⚠ Exceeds reel weight by ${fmt(Math.abs(diff).toFixed(1))} kg`}
-                </div>
-                {conversionForm.labourRate > 0 && (
-                  <div style={{ fontSize: 11, color: "#2d6a4f", marginTop: 4, fontWeight: 600 }}>
-                    Labour: {fmtRate(conversionForm.labourRate)}/kg × {fmt(totalLinerWt)} kg = {fmtRs(Number(conversionForm.labourRate) * totalLinerWt)}
-                  </div>
-                )}
-                {conversionForm.labourRate > 0 && converting.costRate && (
-                  <div style={{ fontSize: 11, color: "#8b6914", marginTop: 2 }}>
-                    Liner cost rate: {fmtRate(Number(converting.costRate) + Number(conversionForm.labourRate))}/kg (paper + labour)
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-        {/* Conversion details */}
+
+        {/* Conversion details (sticky top) */}
         <div className="card">
-          <h3>Conversion Details</h3>
+          <h3>Conversion Details — applies to all selected reels</h3>
           <div className="g3">
-            <div>
-              <label className="lbl">Corrugator Name</label>
+            <div><label className="lbl">Corrugator Name</label>
               <input value={conversionForm.corrugator} onChange={e => setConversionForm(f => ({ ...f, corrugator: e.target.value }))} placeholder="e.g. Ravi Corrugators" />
             </div>
-            <div>
-              <label className="lbl">Labour Rate (₹/kg)</label>
+            <div><label className="lbl">Labour Rate (₹/kg output)</label>
               <input type="number" inputMode="numeric" value={conversionForm.labourRate} onChange={e => setConversionForm(f => ({ ...f, labourRate: e.target.value }))} placeholder="e.g. 4" />
             </div>
-            <div>
-              <label className="lbl">Conversion Date</label>
+            <div><label className="lbl">Conversion Date</label>
               <input type="date" value={conversionForm.date} onChange={e => setConversionForm(f => ({ ...f, date: e.target.value }))} />
             </div>
           </div>
         </div>
-        {/* Liner weights entry */}
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <h3 style={{ marginBottom: 0 }}>Output Liners — {linerWeights.filter(x => x.weight).length} entries</h3>
-            <span style={{ fontSize: 12, color: "#8b6914", fontWeight: 600 }}>{fmt(totalLinerWt)} kg total</span>
+
+        {/* Filter bar */}
+        <div className="card" style={{ padding: "12px 16px" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ minWidth: 120 }}>
+              <label className="lbl">Grade</label>
+              <select value={`${convFilter.bf}|${convFilter.gsm}`} onChange={e => { const [bf, gsm] = e.target.value.split("|"); setConvFilter(f => ({ ...f, bf, gsm })); }}>
+                <option value="|">All grades</option>
+                {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
+              </select>
+            </div>
+            <div style={{ minWidth: 100 }}>
+              <label className="lbl">Size</label>
+              <select value={convFilter.size} onChange={e => setConvFilter(f => ({ ...f, size: e.target.value }))}>
+                <option value="">All sizes</option>
+                {[...new Set(availableReels.map(r => r.size))].sort((a, b) => Number(a) - Number(b)).map(s => <option key={s} value={s}>{s}"</option>)}
+              </select>
+            </div>
+            <div style={{ fontSize: 12, color: "#9a9080", paddingBottom: 4 }}>
+              {filteredReels.length} reels · {selectedReelIds.length} selected
+            </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
-            {linerWeights.map((lw, idx) => (
-              <div key={lw.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "#b0a898", minWidth: 24, textAlign: "right" }}>#{idx + 1}</span>
-                <input
-                  type="number" inputMode="numeric"
-                  value={lw.weight}
-                  onChange={e => updateLinerWeight(lw.id, e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLinerRow(); } }}
-                  placeholder="kg"
-                  style={{ width: 100 }}
-                  autoFocus={idx === linerWeights.length - 1 && idx > 0}
-                />
-                <span style={{ fontSize: 11, color: "#9a9080" }}>kg</span>
-                {linerWeights.length > 1 && (
-                  <button onClick={() => removeLinerRow(lw.id)} style={{ background: "transparent", color: "#b83020", border: "1px solid #f0c0ba", borderRadius: 4, padding: "2px 7px", fontSize: 11, cursor: "pointer" }}>✕</button>
-                )}
-              </div>
-            ))}
-          </div>
-          <button className="btn btn-outline btn-sm" onClick={addLinerRow}>+ Add liner</button>
-          <div style={{ marginTop: 10, fontSize: 11, color: "#8a8070", fontStyle: "italic" }}>Press Enter to quickly add the next liner weight.</div>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button className="btn btn-dark" onClick={saveConversion} disabled={linerWeights.filter(x => x.weight).length === 0}>
-            ✓ Save Conversion — {linerWeights.filter(x => x.weight).length} liners
-          </button>
-          <button className="btn btn-outline" onClick={() => setView("list")}>Cancel</button>
+
+        {/* Reels grouped by size — with weight chips */}
+        {Object.values(reelsBySize).sort((a, b) => Number(a.size) - Number(b.size)).map(grp => (
+          <div key={`${grp.size}|${grp.bf}|${grp.gsm}`} className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span className="serif" style={{ fontSize: 22 }}>{grp.size}"</span>
+              <span className="tag">{grp.bf} BF · {grp.gsm} GSM</span>
+              <span style={{ fontSize: 11, color: "#9a9080" }}>{grp.reels.length} reel{grp.reels.length !== 1 ? "s" : ""}</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {grp.reels.sort((a, b) => Number(a.weight) - Number(b.weight)).map((r, idx) => {
+                const sel = selectedReelIds.includes(r.id);
+                const reelLiners = convReelWeights[r.id] || [];
+                const reelLinerWt = reelLiners.filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
+                const diff = Number(r.weight) - reelLinerWt;
+                return (
+                  <div key={r.id} style={{ border: `2px solid ${sel ? "#8b6914" : "#e8e2d8"}`, borderRadius: 12, padding: "10px 12px", background: sel ? "#fdf9f0" : "#faf8f4", minWidth: 160, flex: "1 1 160px", maxWidth: 260 }}>
+                    {/* Reel header — click to select */}
+                    <div onClick={() => toggleReelSelect(r.id)} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, marginBottom: sel ? 10 : 0 }}>
+                      <div style={{ width: 20, height: 20, border: `2px solid ${sel ? "#8b6914" : "#ccc8c0"}`, borderRadius: 4, background: sel ? "#8b6914" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {sel && <span style={{ color: "#fff", fontSize: 11 }}>✓</span>}
+                      </div>
+                      <div>
+                        <div className="serif" style={{ fontSize: 20, lineHeight: 1 }}>{fmt(r.weight)} kg</div>
+                        <div style={{ fontSize: 10, color: "#9a9080", marginTop: 2 }}>{fmtDate(r.inwardDate)} · {r.supplier || "—"}</div>
+                      </div>
+                    </div>
+                    {/* Liner weights entry — only when selected */}
+                    {sel && (
+                      <div>
+                        <div style={{ fontSize: 10, color: "#8b6914", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                          Output liner weights
+                          {reelLinerWt > 0 && <span style={{ color: diff >= 0 ? "#2d6a4f" : "#b83020", marginLeft: 8, fontWeight: 600 }}>
+                            {fmt(reelLinerWt)} kg{diff >= 0 ? ` (${fmt(diff.toFixed(1))} waste)` : ` ⚠ over by ${fmt(Math.abs(diff).toFixed(1))}`}
+                          </span>}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                          {reelLiners.map((lw, li) => (
+                            <div key={lw.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <span style={{ fontSize: 10, color: "#b0a898", minWidth: 18 }}>#{li + 1}</span>
+                              <input type="number" inputMode="numeric" value={lw.weight}
+                                onChange={e => updateLinerWeight(r.id, lw.id, e.target.value)}
+                                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addLinerRow(r.id); } }}
+                                placeholder="kg" style={{ width: 80, padding: "3px 6px", fontSize: 12 }}
+                                autoFocus={li === reelLiners.length - 1 && li > 0} />
+                              <span style={{ fontSize: 10, color: "#9a9080" }}>kg</span>
+                              {reelLiners.length > 1 && <button onClick={() => removeLinerRow(r.id, lw.id)} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 13, cursor: "pointer", lineHeight: 1 }}>✕</button>}
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={() => addLinerRow(r.id)} style={{ fontSize: 11, background: "transparent", border: "1px solid #e5dece", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#8b6914" }}>+ liner</button>
+                        {conversionForm.labourRate > 0 && reelLinerWt > 0 && (
+                          <div style={{ fontSize: 10, color: "#2d6a4f", marginTop: 6, fontWeight: 600 }}>
+                            Labour: {fmtRs(Number(conversionForm.labourRate) * reelLinerWt)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {filteredReels.length === 0 && (
+          <div className="card" style={{ textAlign: "center", padding: 32 }}>
+            <span className="serif-italic" style={{ fontSize: 15, color: "#b0a898" }}>No reels match the filter.</span>
+          </div>
+        )}
+
+        {/* Sticky save bar */}
+        <div style={{ position: "sticky", bottom: 0, background: "#f8f7f4", padding: "10px 0 0" }}>
+          <div className="card" style={{ borderTop: "2px solid #e8e2d8", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 13, color: "#6a6050" }}>
+                <strong>{selectedReelIds.length}</strong> reels selected · <strong>{totalLinersAcrossAll}</strong> liner entries
+                {conversionForm.labourRate > 0 && totalLinersAcrossAll > 0 && (() => {
+                  const totalOutputKg = Object.values(convReelWeights).flat().filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
+                  return <span style={{ color: "#2d6a4f", fontWeight: 600, marginLeft: 8 }}>Labour: {fmtRs(Number(conversionForm.labourRate) * totalOutputKg)}</span>;
+                })()}
+              </div>
+              <button className="btn btn-dark" onClick={saveConversion} disabled={selectedReelIds.length === 0 || totalLinersAcrossAll === 0}>
+                ✓ Save {totalLinersAcrossAll} Liner{totalLinersAcrossAll !== 1 ? "s" : ""}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Conversion history view
+  // ── CONVERSION HISTORY VIEW ──
   if (view === "convertHistory") {
     const batches = Object.values(conversionBatches).sort((a, b) => new Date(b.date) - new Date(a.date));
     return (
@@ -1762,7 +1816,7 @@ function LinerStockTab({ state, update }) {
     );
   }
 
-  // Main liner list view
+  // ── MAIN LINER LIST VIEW ──
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       {convSaved && <div className="ok-box">✓ Conversion saved! Liners added to stock.</div>}
@@ -1770,44 +1824,20 @@ function LinerStockTab({ state, update }) {
         <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>
-        </div>
-      </div>
-
-      {/* Convert reel to liners section */}
-      {availableReels.length > 0 && (
-        <div className="card">
-          <h3 style={{ marginBottom: 12 }}>Convert Reel → Liners</h3>
-          <p style={{ fontSize: 12, color: "#8a8070", marginBottom: 12, lineHeight: 1.6 }}>Select a reel to send to a corrugator for conversion. You'll enter individual liner weights after conversion.</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {availableReels.filter(r => !r.converted).sort((a, b) => Number(a.size) - Number(b.size)).map(r => (
-              <button key={r.id}
-                onClick={() => startConvert(r)}
-                style={{ background: "#1a1a1a", border: "1.5px solid #1a1a1a", borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", transition: "all 0.15s", color: "#fff" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "#8b6914"; e.currentTarget.style.borderColor = "#8b6914"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "#1a1a1a"; e.currentTarget.style.borderColor = "#1a1a1a"; }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span className="serif" style={{ fontSize: 22, color: "#fff" }}>{r.size}"</span>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{r.bf} BF · {r.gsm} GSM</div>
-                    <div style={{ fontSize: 11, color: "#c8b89a" }}>{fmt(r.weight)} kg</div>
-                  </div>
-                  <span style={{ fontSize: 18, marginLeft: 4, color: "#c8b89a" }}>→</span>
-                </div>
-              </button>
-            ))}
-          </div>
-          {availableReels.filter(r => !r.converted).length === 0 && (
-            <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>All available reels have been converted or no reels in stock.</div>
+          {availableReels.length > 0 && (
+            <button className="btn btn-dark" onClick={() => setView("convert")}>🔄 Convert Reels</button>
           )}
         </div>
-      )}
+      </div>
 
       {/* Liner stock by spec */}
       {Object.keys(linerGroups).length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40 }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
           <div className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No liner stock yet.</div>
-          <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>Convert a reel to liners to get started.</div>
+          <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>
+            {availableReels.length > 0 ? <button className="btn btn-dark btn-sm" onClick={() => setView("convert")}>Convert reels to get started</button> : "Add reels first, then convert them."}
+          </div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -2825,7 +2855,604 @@ function fmtWeekLabel(ws) {
   return `${mon.toLocaleDateString("en-IN",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}`;
 }
 
+// ── shared period-filter helper ──
+function usePeriod(sold) {
+  const [periodMode, setPeriodMode] = useState("month");
+  const [selDate, setSelDate] = useState(today());
+  const [selWeek, setSelWeek] = useState(toISOWeek(new Date()));
+  const [selMonth, setSelMonth] = useState(() => {
+    const months = [...new Set(sold.map(r => monthKey(r.soldDate)).filter(Boolean))].sort().reverse();
+    return months[0] || today().slice(0, 7);
+  });
+  const allMonths = [...new Set(sold.map(r => monthKey(r.soldDate)))].sort().reverse();
+  const filter = r => {
+    if (periodMode === "all") return true;
+    if (periodMode === "day") return r.soldDate === selDate;
+    if (periodMode === "week") { const [mon, sun] = weekToRange(selWeek); const d = new Date(r.soldDate); return d >= mon && d <= sun; }
+    if (periodMode === "month") return monthKey(r.soldDate) === selMonth;
+    return true;
+  };
+  const periodSold = sold.filter(filter);
+  const periodLabel = periodMode === "all" ? "All Time" : periodMode === "day" ? fmtDate(selDate) : periodMode === "week" ? fmtWeekLabel(selWeek) : monthLabel(selMonth);
+  const PeriodBar = () => (
+    <div className="card" style={{ padding: "12px 16px" }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <label className="lbl">Period</label>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[["day","Day"],["week","Week"],["month","Month"],["all","All"]].map(([v, l]) => (
+              <button key={v} onClick={() => setPeriodMode(v)}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1.5px solid", fontSize: 12, cursor: "pointer", fontWeight: periodMode === v ? 700 : 400, background: periodMode === v ? "#1a1a1a" : "#fff", color: periodMode === v ? "#fff" : "#6a6050", borderColor: periodMode === v ? "#1a1a1a" : "#ddd8ce" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+        {periodMode === "day" && <div><label className="lbl">Date</label><input type="date" value={selDate} onChange={e => setSelDate(e.target.value)} style={{ minWidth: 140 }} /></div>}
+        {periodMode === "week" && <div><label className="lbl">Week</label><input type="week" value={selWeek} onChange={e => setSelWeek(e.target.value)} style={{ minWidth: 160 }} /></div>}
+        {periodMode === "month" && (
+          <div><label className="lbl">Month</label>
+            <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
+              {allMonths.length > 0 ? allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>) : <option value={selMonth}>{monthLabel(selMonth)}</option>}
+            </select>
+          </div>
+        )}
+        <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{periodLabel}</div>
+      </div>
+    </div>
+  );
+  return { periodSold, periodLabel, PeriodBar };
+}
+
 function ReportsTab({ state }) {
+  const [reportTab, setReportTab] = useState("reels"); // "reels" | "liner" | "business"
+  const allSold = state.stock.filter(r => r.sold && r.soldDate);
+  const reelSold = allSold.filter(r => r.productType !== "liner");
+  const linerSold = allSold.filter(r => r.productType === "liner");
+
+  if (allSold.length === 0) return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
+      <div className="card" style={{ textAlign: "center", padding: 52 }}>
+        <div style={{ fontSize: 36, marginBottom: 16 }}>📊</div>
+        <div className="serif-italic" style={{ fontSize: 18, color: "#b0a898" }}>No sales data yet.</div>
+        <div style={{ fontSize: 13, color: "#b0a898", marginTop: 8 }}>Record your first sale to see reports.</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
+      {/* Section switcher */}
+      <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start", flexWrap: "wrap" }}>
+        {[["reels","📦 Reels"],["liner","📄 Liner"],["business","🏢 Full Business"]].map(([t, label]) => (
+          <button key={t} onClick={() => setReportTab(t)}
+            style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: reportTab === t ? "#fff" : "transparent", color: reportTab === t ? "#1a1a1a" : "#8b6914", fontWeight: reportTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: reportTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {reportTab === "reels" && <ReelReport state={state} soldData={reelSold} />}
+      {reportTab === "liner" && <LinerReport state={state} soldData={linerSold} />}
+      {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} allSold={allSold} />}
+    </div>
+  );
+}
+
+// ─── REEL REPORT ─────────────────────────────────────────────────────────────
+function ReelReport({ state, soldData }) {
+  const { periodSold, periodLabel, PeriodBar } = usePeriod(soldData);
+  const sold = soldData;
+  const allMonths = [...new Set(sold.map(r => monthKey(r.soldDate)))].sort().reverse();
+  const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
+
+  const gradeMap = {};
+  periodSold.forEach(r => {
+    const k = `${r.bf} BF ${r.gsm} GSM`;
+    if (!gradeMap[k]) gradeMap[k] = { bf: r.bf, gsm: r.gsm, reels: 0, kg: 0, revenue: 0, cost: 0 };
+    gradeMap[k].reels++;
+    gradeMap[k].kg += Number(r.weight);
+    gradeMap[k].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
+    gradeMap[k].cost += (Number(r.costRate) || 0) * Number(r.weight);
+  });
+  const sizeMap = {};
+  periodSold.forEach(r => { sizeMap[r.size] = (sizeMap[r.size] || 0) + 1; });
+  const topSizes = Object.entries(sizeMap).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const custMap = {};
+  periodSold.forEach(r => {
+    const c = r.soldTo || "Unknown";
+    if (!custMap[c]) custMap[c] = { reels: 0, kg: 0, revenue: 0, profit: 0, sizes: {} };
+    custMap[c].reels++; custMap[c].kg += Number(r.weight);
+    custMap[c].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
+    custMap[c].profit += ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight);
+    custMap[c].sizes[r.size] = (custMap[c].sizes[r.size] || 0) + 1;
+  });
+  const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
+  const last6 = allMonths.slice(0, 6).reverse();
+  const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0) }));
+  const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
+  const totalCost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+  const totalProfit = totalRevenue - totalCost;
+
+  // Turnaround
+  const turnReels = sold.filter(r => r.inwardDate && r.soldDate);
+  const turnByGrade = {}; const turnBySize = {};
+  turnReels.forEach(r => {
+    const days = Math.round((new Date(r.soldDate) - new Date(r.inwardDate)) / 86400000);
+    if (days < 0) return;
+    const gk = `${r.bf} BF ${r.gsm} GSM`;
+    if (!turnByGrade[gk]) turnByGrade[gk] = []; turnByGrade[gk].push(days);
+    if (!turnBySize[r.size]) turnBySize[r.size] = []; turnBySize[r.size].push(days);
+  });
+  const avg = arr => arr.length ? Math.round(arr.reduce((s, x) => s + x, 0) / arr.length) : null;
+  const med = arr => { if (!arr.length) return null; const s = [...arr].sort((a,b)=>a-b); return s[Math.floor(s.length/2)]; };
+
+  // Size × Grade cross-tab
+  const allSoldSizes = [...new Set(periodSold.map(r => r.size))].sort((a, b) => Number(a) - Number(b));
+  const crossTab = {};
+  periodSold.forEach(r => {
+    const gk = `${r.bf}|${r.gsm}`;
+    if (!crossTab[r.size]) crossTab[r.size] = {};
+    if (!crossTab[r.size][gk]) crossTab[r.size][gk] = { reels: 0, kg: 0 };
+    crossTab[r.size][gk].reels++; crossTab[r.size][gk].kg += Number(r.weight);
+  });
+  const crossGradeLabels = [...new Set(periodSold.map(r => `${r.bf}|${r.gsm}`))].sort();
+  const sizeRowTotals = {}; allSoldSizes.forEach(sz => { sizeRowTotals[sz] = { reels: 0, kg: 0 }; crossGradeLabels.forEach(gk => { sizeRowTotals[sz].reels += crossTab[sz]?.[gk]?.reels || 0; sizeRowTotals[sz].kg += crossTab[sz]?.[gk]?.kg || 0; }); });
+  const gradeColTotals = {}; crossGradeLabels.forEach(gk => { gradeColTotals[gk] = { reels: 0, kg: 0 }; allSoldSizes.forEach(sz => { gradeColTotals[gk].reels += crossTab[sz]?.[gk]?.reels || 0; gradeColTotals[gk].kg += crossTab[sz]?.[gk]?.kg || 0; }); });
+
+  if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No reel sales yet.</span></div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <PeriodBar />
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+        {[
+          { label: "Reels Sold", val: periodSold.length, unit: "reels" },
+          { label: "Total Weight", val: fmt(Math.round(totalKg)) + " kg", unit: (totalKg/1000).toFixed(2) + " tons" },
+          { label: "Revenue", val: totalRevenue > 0 ? fmtRs(totalRevenue) : "—", unit: "gross" },
+          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+        ].map(k => (
+          <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
+            <div className="lbl">{k.label}</div>
+            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+          </div>
+        ))}
+      </div>
+      {/* Monthly trend */}
+      {trendData.length > 1 && (
+        <div className="card">
+          <h3>Monthly Volume Trend (kg)</h3>
+          <BarChart data={trendData} color="#8b6914" />
+        </div>
+      )}
+      {/* Grade breakdown */}
+      {Object.keys(gradeMap).length > 0 && (
+        <div className="card">
+          <h3>Grade Breakdown</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 12 }}>
+              <thead><tr><th>Grade</th><th>Reels</th><th>kg</th><th>Revenue</th><th>Cost</th><th>Profit</th><th>Margin</th></tr></thead>
+              <tbody>
+                {Object.entries(gradeMap).sort((a, b) => b[1].revenue - a[1].revenue).map(([k, g]) => {
+                  const profit = g.revenue - g.cost;
+                  const margin = g.revenue > 0 ? (profit / g.revenue * 100).toFixed(1) : "—";
+                  const color = profit >= 0 ? "#2d6a4f" : "#b83020";
+                  return (
+                    <tr key={k}>
+                      <td style={{ fontWeight: 600 }}>{k}</td>
+                      <td>{g.reels}</td>
+                      <td>{fmt(Math.round(g.kg))}</td>
+                      <td>{g.revenue > 0 ? fmtRs(g.revenue) : "—"}</td>
+                      <td style={{ color: "#8a8070" }}>{g.cost > 0 ? fmtRs(g.cost) : "—"}</td>
+                      <td style={{ color, fontWeight: 700 }}>{g.revenue > 0 ? fmtRs(profit) : "—"}</td>
+                      <td style={{ color }}>{margin !== "—" ? margin + "%" : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* Size × Grade cross-tab */}
+      {allSoldSizes.length > 0 && crossGradeLabels.length > 0 && (
+        <div className="card">
+          <h3>Size × Grade Matrix</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 11 }}>
+              <thead>
+                <tr>
+                  <th>Size</th>
+                  {crossGradeLabels.map(gk => { const [bf, gsm] = gk.split("|"); return <th key={gk} style={{ textAlign: "center" }}>{bf}BF/{gsm}</th>; })}
+                  <th style={{ textAlign: "right" }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allSoldSizes.map(sz => {
+                  const rowTotal = sizeRowTotals[sz];
+                  return (
+                    <tr key={sz}>
+                      <td><span className="serif" style={{ fontSize: 18 }}>{sz}"</span></td>
+                      {crossGradeLabels.map(gk => { const cell = crossTab[sz]?.[gk]; return <td key={gk} style={{ textAlign: "center" }}>{cell ? <><div style={{ fontWeight: 600 }}>{cell.reels}</div><div style={{ fontSize: 9, color: "#9a9080" }}>{fmt(Math.round(cell.kg))}kg</div></> : <span style={{ color: "#ddd" }}>—</span>}</td>; })}
+                      <td style={{ textAlign: "right" }}><div style={{ fontWeight: 700 }}>{rowTotal.reels}</div><div style={{ fontSize: 9, color: "#8b6914", fontWeight: 600 }}>{fmt(Math.round(rowTotal.kg))}kg</div></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "#f5f0e8" }}>
+                  <td style={{ fontWeight: 700, fontSize: 12 }}>Total</td>
+                  {crossGradeLabels.map(gk => { const col = gradeColTotals[gk]; return <td key={gk} style={{ textAlign: "center" }}><div style={{ fontWeight: 700 }}>{col.reels}</div><div style={{ fontSize: 9, color: "#8b6914", fontWeight: 600 }}>{fmt(Math.round(col.kg))}kg</div></td>; })}
+                  <td style={{ textAlign: "right" }}><div style={{ fontWeight: 700 }}>{periodSold.length}</div><div style={{ fontSize: 9, color: "#8b6914", fontWeight: 700 }}>{fmt(Math.round(totalKg))}kg</div></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* Top customers */}
+      {top5Cust.length > 0 && (
+        <div className="card">
+          <h3>Top Customers</h3>
+          {top5Cust.map(([name, data], idx) => {
+            const barW = top5Cust[0] ? (data.kg / top5Cust[0][1].kg) * 100 : 0;
+            return (
+              <div key={name} style={{ padding: "14px 0", borderBottom: idx < top5Cust.length - 1 ? "1px solid #e8eef8" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 26, height: 26, background: CHART_COLORS[idx], borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700 }}>{idx+1}</div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
+                      <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{data.reels} reels · {fmt(Math.round(data.kg))} kg</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    {data.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 700 }}>{fmtRs(data.revenue)}</div>}
+                    {data.profit !== 0 && data.revenue > 0 && <div style={{ fontSize: 11, color: data.profit >= 0 ? "#2d6a4f" : "#b83020" }}>{fmtRs(data.profit)} profit</div>}
+                  </div>
+                </div>
+                <div style={{ background: "#e8eef8", borderRadius: 3, height: 3, overflow: "hidden" }}>
+                  <div style={{ width: `${barW}%`, height: "100%", background: CHART_COLORS[idx], borderRadius: 3 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* Turnaround */}
+      {turnReels.length > 0 && Object.keys(turnByGrade).length > 0 && (
+        <div className="card">
+          <h3>Turnaround Time by Grade</h3>
+          <p style={{ fontSize: 12, color: "#9a9080", marginBottom: 12 }}>Days from inward to sale. Shorter = faster moving stock.</p>
+          <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", background: "#f5f0e8", padding: "8px 14px" }}>
+              {["Grade","Reels","Avg","Median","Fastest"].map(h => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em" }}>{h}</span>)}
+            </div>
+            {Object.entries(turnByGrade).sort((a, b) => (avg(a[1])||0) - (avg(b[1])||0)).map(([grade, days]) => {
+              const avgD = avg(days); const color = avgD <= 14 ? "#2d6a4f" : avgD <= 30 ? "#8b6914" : "#b83020";
+              return (
+                <div key={grade} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", padding: "10px 14px", borderTop: "1px solid #f5f0e8", alignItems: "center" }}>
+                  <span style={{ fontWeight: 600, fontSize: 12 }}>{grade}</span>
+                  <span style={{ fontSize: 12 }}>{days.length}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color }}>{avgD}d</span>
+                  <span style={{ fontSize: 12, color: "#6a6050" }}>{med(days)}d</span>
+                  <span style={{ fontSize: 12, color: "#2d6a4f", fontWeight: 600 }}>{Math.min(...days)}d</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LINER REPORT ─────────────────────────────────────────────────────────────
+function LinerReport({ state, soldData }) {
+  const { periodSold, periodLabel, PeriodBar } = usePeriod(soldData);
+
+  const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
+  const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
+  const totalCost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+  const totalProfit = totalRevenue - totalCost;
+  const totalLabour = periodSold.reduce((s, r) => s + (Number(r.labourRate) || 0) * Number(r.weight), 0);
+
+  // By spec
+  const specMap = {};
+  periodSold.forEach(r => {
+    const k = `${r.bf} BF ${r.gsm} GSM ${r.size}"`;
+    if (!specMap[k]) specMap[k] = { bf: r.bf, gsm: r.gsm, size: r.size, liners: 0, kg: 0, revenue: 0, cost: 0 };
+    specMap[k].liners++; specMap[k].kg += Number(r.weight);
+    specMap[k].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
+    specMap[k].cost += (Number(r.costRate) || 0) * Number(r.weight);
+  });
+
+  // By customer
+  const custMap = {};
+  periodSold.forEach(r => {
+    const c = r.soldTo || "Unknown";
+    if (!custMap[c]) custMap[c] = { liners: 0, kg: 0, revenue: 0, profit: 0 };
+    custMap[c].liners++; custMap[c].kg += Number(r.weight);
+    custMap[c].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
+    custMap[c].profit += ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight);
+  });
+  const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
+
+  // Monthly trend
+  const allMonths = [...new Set(soldData.map(r => monthKey(r.soldDate)))].sort().reverse();
+  const last6 = allMonths.slice(0, 6).reverse();
+  const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: soldData.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0) }));
+
+  if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No liner sales yet.</span></div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <PeriodBar />
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+        {[
+          { label: "Liners Sold", val: periodSold.length, unit: "individual liners" },
+          { label: "Total Weight", val: fmt(Math.round(totalKg)) + " kg", unit: (totalKg/1000).toFixed(2) + " tons" },
+          { label: "Revenue", val: totalRevenue > 0 ? fmtRs(totalRevenue) : "—", unit: "gross" },
+          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+        ].map(k => (
+          <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
+            <div className="lbl">{k.label}</div>
+            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+          </div>
+        ))}
+      </div>
+      {/* Labour cost card */}
+      {totalLabour > 0 && (
+        <div className="card" style={{ background: "#f0f7f4", border: "1.5px solid #b5dcc0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div className="lbl">Total Labour Cost (this period)</div>
+              <div className="serif" style={{ fontSize: 22, color: "#2d6a4f" }}>{fmtRs(totalLabour)}</div>
+              <div style={{ fontSize: 11, color: "#5a9070", marginTop: 3 }}>Corrugator conversion charges on {fmt(Math.round(totalKg))} kg output</div>
+            </div>
+            {totalRevenue > 0 && <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "#5a9070" }}>Labour as % of revenue</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#2d6a4f" }}>{((totalLabour/totalRevenue)*100).toFixed(1)}%</div>
+            </div>}
+          </div>
+        </div>
+      )}
+      {/* Monthly trend */}
+      {trendData.length > 1 && (
+        <div className="card">
+          <h3>Monthly Volume Trend (kg)</h3>
+          <BarChart data={trendData} color="#3a7a8a" />
+        </div>
+      )}
+      {/* By spec */}
+      {Object.keys(specMap).length > 0 && (
+        <div className="card">
+          <h3>Liner Spec Breakdown</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 12 }}>
+              <thead><tr><th>Spec</th><th>Liners</th><th>kg</th><th>Revenue</th><th>Profit</th><th>Margin</th></tr></thead>
+              <tbody>
+                {Object.entries(specMap).sort((a, b) => b[1].kg - a[1].kg).map(([k, g]) => {
+                  const profit = g.revenue - g.cost;
+                  const margin = g.revenue > 0 ? (profit / g.revenue * 100).toFixed(1) : "—";
+                  const color = profit >= 0 ? "#2d6a4f" : "#b83020";
+                  return (
+                    <tr key={k}>
+                      <td style={{ fontWeight: 600 }}>{k}</td>
+                      <td>{g.liners}</td>
+                      <td>{fmt(Math.round(g.kg))}</td>
+                      <td>{g.revenue > 0 ? fmtRs(g.revenue) : "—"}</td>
+                      <td style={{ color, fontWeight: 700 }}>{g.revenue > 0 ? fmtRs(profit) : "—"}</td>
+                      <td style={{ color }}>{margin !== "—" ? margin + "%" : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* Top customers */}
+      {top5Cust.length > 0 && (
+        <div className="card">
+          <h3>Top Liner Customers</h3>
+          {top5Cust.map(([name, data], idx) => {
+            const barW = top5Cust[0] ? (data.kg / top5Cust[0][1].kg) * 100 : 0;
+            return (
+              <div key={name} style={{ padding: "14px 0", borderBottom: idx < top5Cust.length - 1 ? "1px solid #e8eef8" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 26, height: 26, background: CHART_COLORS[idx], borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700 }}>{idx+1}</div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
+                      <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{data.liners} liners · {fmt(Math.round(data.kg))} kg</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    {data.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 700 }}>{fmtRs(data.revenue)}</div>}
+                    {data.profit !== 0 && data.revenue > 0 && <div style={{ fontSize: 11, color: data.profit >= 0 ? "#2d6a4f" : "#b83020" }}>{fmtRs(data.profit)} profit</div>}
+                  </div>
+                </div>
+                <div style={{ background: "#e8eef8", borderRadius: 3, height: 3, overflow: "hidden" }}>
+                  <div style={{ width: `${barW}%`, height: "100%", background: CHART_COLORS[idx], borderRadius: 3 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── BUSINESS REPORT ─────────────────────────────────────────────────────────
+function BusinessReport({ state, reelSold, linerSold, allSold }) {
+  const { periodSold: periodAll, periodLabel, PeriodBar } = usePeriod(allSold);
+  const periodReels = periodAll.filter(r => r.productType !== "liner");
+  const periodLiners = periodAll.filter(r => r.productType === "liner");
+
+  const calc = arr => ({
+    count: arr.length,
+    kg: arr.reduce((s, r) => s + Number(r.weight), 0),
+    revenue: arr.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0),
+    cost: arr.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0),
+  });
+  const R = calc(periodReels);
+  const L = calc(periodLiners);
+  const T = calc(periodAll);
+  const reelProfit = R.revenue - R.cost;
+  const linerProfit = L.revenue - L.cost;
+  const totalProfit = T.revenue - T.cost;
+
+  // Monthly combined trend
+  const allMonths = [...new Set(allSold.map(r => monthKey(r.soldDate)))].sort().reverse();
+  const last6 = allMonths.slice(0, 6).reverse();
+  const trendData = last6.map(m => ({
+    label: monthLabel(m).split(" ")[0],
+    reels: reelSold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0),
+    liner: linerSold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0),
+  }));
+
+  // Revenue split pie
+  const revSplit = [];
+  if (R.revenue > 0) revSplit.push({ label: "Reels", value: R.revenue });
+  if (L.revenue > 0) revSplit.push({ label: "Liner", value: L.revenue });
+
+  // Profit split pie
+  const profSplit = [];
+  if (reelProfit > 0) profSplit.push({ label: "Reels", value: reelProfit });
+  if (linerProfit > 0) profSplit.push({ label: "Liner", value: linerProfit });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <PeriodBar />
+      {/* Master KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+        {[
+          { label: "Total Revenue", val: T.revenue > 0 ? fmtRs(T.revenue) : "—", unit: "all products" },
+          { label: "Total Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: T.revenue > 0 ? ((totalProfit/T.revenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+          { label: "Total Weight", val: fmt(Math.round(T.kg)) + " kg", unit: (T.kg/1000).toFixed(2) + " tons" },
+          { label: "Total Orders", val: [...new Set(periodAll.map(r => r.soldChallanNo).filter(Boolean))].length || periodAll.length, unit: "challans dispatched" },
+        ].map(k => (
+          <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
+            <div className="lbl">{k.label}</div>
+            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Side-by-side product comparison */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {[
+          { label: "📦 Reels", data: R, profit: reelProfit, color: "#8b6914", bg: "#fdf9f0" },
+          { label: "📄 Liner", data: L, profit: linerProfit, color: "#2a5a8a", bg: "#f0f5ff" },
+        ].map(({ label, data, profit, color, bg }) => (
+          <div key={label} className="card" style={{ background: bg, border: `1.5px solid ${color}22` }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color, marginBottom: 10 }}>{label}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Items sold</span><strong>{data.count}</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Weight</span><strong>{fmt(Math.round(data.kg))} kg</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Revenue</span><strong>{data.revenue > 0 ? fmtRs(data.revenue) : "—"}</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Profit</span><strong style={{ color: profit >= 0 ? "#2d6a4f" : "#b83020" }}>{data.revenue > 0 ? fmtRs(profit) : "—"}</strong></div>
+              {data.revenue > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Margin</span><strong style={{ color: profit >= 0 ? "#2d6a4f" : "#b83020" }}>{((profit/data.revenue)*100).toFixed(1)}%</strong></div>}
+              {T.revenue > 0 && data.revenue > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Rev share</span><strong style={{ color }}>{((data.revenue/T.revenue)*100).toFixed(1)}%</strong></div>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Revenue & Profit split pies */}
+      {revSplit.length > 1 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="card">
+            <h3>Revenue Split</h3>
+            <PieChart data={revSplit} size={140} />
+          </div>
+          {profSplit.length > 1 && <div className="card">
+            <h3>Profit Split</h3>
+            <PieChart data={profSplit} size={140} />
+          </div>}
+        </div>
+      )}
+
+      {/* Combined monthly bar chart */}
+      {trendData.length > 1 && (
+        <div className="card">
+          <h3>Monthly Volume — Reels vs Liner (kg)</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {trendData.map(d => {
+              const maxVal = Math.max(...trendData.map(x => x.reels + x.liner), 1);
+              const reelW = (d.reels / maxVal) * 100;
+              const linerW = (d.liner / maxVal) * 100;
+              return (
+                <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 11, color: "#9a9080", minWidth: 36 }}>{d.label}</span>
+                  <div style={{ flex: 1, display: "flex", gap: 2, height: 18, borderRadius: 4, overflow: "hidden" }}>
+                    {d.reels > 0 && <div style={{ width: `${reelW}%`, background: "#8b6914", borderRadius: d.liner === 0 ? 4 : "4px 0 0 4px", transition: "width 0.4s" }} />}
+                    {d.liner > 0 && <div style={{ width: `${linerW}%`, background: "#3a7a8a", borderRadius: d.reels === 0 ? 4 : "0 4px 4px 0", transition: "width 0.4s" }} />}
+                  </div>
+                  <span style={{ fontSize: 11, color: "#6a6050", minWidth: 70, textAlign: "right" }}>
+                    {fmt(Math.round(d.reels + d.liner))} kg
+                  </span>
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b6914" }}><div style={{ width: 10, height: 10, background: "#8b6914", borderRadius: 2 }} />Reels</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#3a7a8a" }}><div style={{ width: 10, height: 10, background: "#3a7a8a", borderRadius: 2 }} />Liner</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Key insights dark card */}
+      <div className="card" style={{ background: "#1a1a1a", color: "#f4f7fb", border: "none" }}>
+        <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabel}</h3>
+        <div className="g3">
+          {[
+            { label: "Strongest Product", val: R.revenue >= L.revenue ? "Reels" : "Liner", sub: `${R.revenue >= L.revenue ? fmtRs(R.revenue) : fmtRs(L.revenue)} revenue` },
+            { label: "Best Margin", val: (reelProfit/Math.max(R.revenue,1)) >= (linerProfit/Math.max(L.revenue,1)) ? "Reels" : "Liner", sub: `${Math.max(R.revenue > 0 ? (reelProfit/R.revenue)*100 : 0, L.revenue > 0 ? (linerProfit/L.revenue)*100 : 0).toFixed(1)}% margin` },
+            { label: "Total Business", val: fmtRs(T.revenue), sub: `${fmtRs(totalProfit)} profit` },
+          ].map(x => (
+            <div key={x.label}>
+              <div className="lbl" style={{ color: "#6a5a4a" }}>{x.label}</div>
+              <div className="serif" style={{ fontSize: 22, color: "#f4f7fb", lineHeight: 1.2 }}>{x.val}</div>
+              <div className="serif-italic" style={{ fontSize: 12, color: "#6a5a4a", marginTop: 4 }}>{x.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BAR CHART HELPER ─────────────────────────────────────────────────────────
+function BarChart({ data, color = "#8b6914" }) {
+  if (!data?.length) return null;
+  const max = Math.max(...data.map(d => d.value), 1);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {data.map(d => (
+        <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 11, color: "#9a9080", minWidth: 34 }}>{d.label}</span>
+          <div style={{ flex: 1, background: "#f0ece4", borderRadius: 4, height: 20, overflow: "hidden" }}>
+            <div style={{ width: `${(d.value / max) * 100}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.4s ease" }} />
+          </div>
+          <span style={{ fontSize: 11, color: "#6a6050", minWidth: 70, textAlign: "right" }}>{fmt(Math.round(d.value))} kg</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── OLD REPORTS TAB SHELL (now empty — replaced above) ──────────────────────
+function _OldReportsTabBody({ state }) {
   const sold = state.stock.filter(r => r.sold && r.soldDate);
   const [periodMode, setPeriodMode] = useState("month");
   const [selDate,  setSelDate]  = useState(today());
