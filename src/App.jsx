@@ -3432,24 +3432,7 @@ function BusinessReport({ state, reelSold, linerSold, allSold }) {
   );
 }
 
-// ─── BAR CHART HELPER ─────────────────────────────────────────────────────────
-function BarChart({ data, color = "#8b6914" }) {
-  if (!data?.length) return null;
-  const max = Math.max(...data.map(d => d.value), 1);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {data.map(d => (
-        <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 11, color: "#9a9080", minWidth: 34 }}>{d.label}</span>
-          <div style={{ flex: 1, background: "#f0ece4", borderRadius: 4, height: 20, overflow: "hidden" }}>
-            <div style={{ width: `${(d.value / max) * 100}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.4s ease" }} />
-          </div>
-          <span style={{ fontSize: 11, color: "#6a6050", minWidth: 70, textAlign: "right" }}>{fmt(Math.round(d.value))} kg</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+
 
 // ─── OLD REPORTS TAB SHELL (now empty — replaced above) ──────────────────────
 function _OldReportsTabBody({ state }) {
