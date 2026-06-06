@@ -1580,6 +1580,11 @@ function LinerStockTab({ state, update }) {
     if (!converting || linerWeights.filter(x => x.weight).length === 0) return;
     const batchId = genId();
     const validLiners = linerWeights.filter(x => x.weight && !isNaN(x.weight));
+    const totalLinerOutputKg = validLiners.reduce((s, x) => s + Number(x.weight), 0);
+    const labourRate = Number(conversionForm.labourRate) || 0;
+    // Total labour cost = output kg × labour rate, spread as ₹/kg on liners
+    // Paper cost rate stays the same per kg (from source reel)
+    const effectiveCostRate = (Number(converting.costRate) || 0) + labourRate;
     const newLiners = validLiners.map((lw, idx) => ({
       id: genId(),
       productType: "liner",
@@ -1592,8 +1597,8 @@ function LinerStockTab({ state, update }) {
       conversionBatchId: batchId,
       conversionDate: conversionForm.date,
       corrugator: conversionForm.corrugator,
-      labourRate: Number(conversionForm.labourRate) || 0,
-      costRate: Number(converting.costRate) || 0,
+      labourRate: labourRate,
+      costRate: effectiveCostRate,  // paper cost + labour per kg
       inwardDate: converting.inwardDate,
       supplier: converting.supplier,
       sold: false,
@@ -1637,6 +1642,16 @@ function LinerStockTab({ state, update }) {
                 <div style={{ fontSize: 11, color: diff >= 0 ? "#8b6914" : "#b83020" }}>
                   {diff >= 0 ? `${fmt(Math.abs(diff).toFixed(1))} kg waste/loss` : `⚠ Exceeds reel weight by ${fmt(Math.abs(diff).toFixed(1))} kg`}
                 </div>
+                {conversionForm.labourRate > 0 && (
+                  <div style={{ fontSize: 11, color: "#2d6a4f", marginTop: 4, fontWeight: 600 }}>
+                    Labour: {fmtRate(conversionForm.labourRate)}/kg × {fmt(totalLinerWt)} kg = {fmtRs(Number(conversionForm.labourRate) * totalLinerWt)}
+                  </div>
+                )}
+                {conversionForm.labourRate > 0 && converting.costRate && (
+                  <div style={{ fontSize: 11, color: "#8b6914", marginTop: 2 }}>
+                    Liner cost rate: {fmtRate(Number(converting.costRate) + Number(conversionForm.labourRate))}/kg (paper + labour)
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1767,16 +1782,16 @@ function LinerStockTab({ state, update }) {
             {availableReels.filter(r => !r.converted).sort((a, b) => Number(a.size) - Number(b.size)).map(r => (
               <button key={r.id}
                 onClick={() => startConvert(r)}
-                style={{ background: "#f5f0e8", border: "1.5px solid #e5dece", borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#8b6914"; e.currentTarget.style.background = "#fdf9f0"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#e5dece"; e.currentTarget.style.background = "#f5f0e8"; }}>
+                style={{ background: "#1a1a1a", border: "1.5px solid #1a1a1a", borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", transition: "all 0.15s", color: "#fff" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "#8b6914"; e.currentTarget.style.borderColor = "#8b6914"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "#1a1a1a"; e.currentTarget.style.borderColor = "#1a1a1a"; }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span className="serif" style={{ fontSize: 22 }}>{r.size}"</span>
+                  <span className="serif" style={{ fontSize: 22, color: "#fff" }}>{r.size}"</span>
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{r.bf} BF · {r.gsm} GSM</div>
-                    <div style={{ fontSize: 11, color: "#9a9080" }}>{fmt(r.weight)} kg</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{r.bf} BF · {r.gsm} GSM</div>
+                    <div style={{ fontSize: 11, color: "#c8b89a" }}>{fmt(r.weight)} kg</div>
                   </div>
-                  <span style={{ fontSize: 18, marginLeft: 4 }}>→</span>
+                  <span style={{ fontSize: 18, marginLeft: 4, color: "#c8b89a" }}>→</span>
                 </div>
               </button>
             ))}
