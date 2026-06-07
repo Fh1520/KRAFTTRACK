@@ -39,7 +39,7 @@ const LINER_GSM_OPTIONS = ["80", "90", "100", "110", "120", "130", "140", "150",
 const PRIORITY_GRADES = [{ bf: "18", gsm: "150" }, { bf: "22", gsm: "180" }];
 const isPriority = (bf, gsm) => PRIORITY_GRADES.some(p => p.bf === bf && p.gsm === gsm);
 
-const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [] };
+const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [] };
 
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function fmtRate(n) { if (!n && n !== 0) return ""; const v = Number(n); return "₹" + (Number.isInteger(v) ? v.toString() : v.toFixed(2)); }
@@ -159,7 +159,38 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
   );
 }
 
-// ─── PRIMESTOCK LOGO ──────────────────────────────────────────────────────────
+// ─── TRANSPORTER AUTOCOMPLETE ─────────────────────────────────────────────────
+function TransporterInput({ value, onChange, transporters, placeholder = "Transporter / Tempo name" }) {
+  const [show, setShow] = useState(false);
+  const ref = useRef(null);
+  const matches = value.length >= 1
+    ? transporters.filter(c => c.toLowerCase().includes(value.toLowerCase()) && c.toLowerCase() !== value.toLowerCase())
+    : transporters.filter(c => c.toLowerCase() !== value.toLowerCase());
+  useEffect(() => {
+    function handle(e) { if (ref.current && !ref.current.contains(e.target)) setShow(false); }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <input value={value} onChange={e => { onChange(e.target.value); setShow(true); }} onFocus={() => setShow(true)} placeholder={placeholder} />
+      {show && matches.length > 0 && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #ddd8ce", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", zIndex: 300, maxHeight: 160, overflowY: "auto", marginTop: 3 }}>
+          {matches.map(c => (
+            <div key={c} onMouseDown={() => { onChange(c); setShow(false); }}
+              style={{ padding: "9px 14px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #e8eef8" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              🚚 {c}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function KraftReelIcon({ size = 30 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
@@ -213,7 +244,7 @@ export default function App() {
             cloudSave(data);
           }
         }
-        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [] });
+        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [] });
       }
       setSyncing(false);
     }, (error) => {
@@ -1405,6 +1436,7 @@ function SellTab({ state, update }) {
   const [productTab, setProductTab] = useState("reels"); // "reels" | "liner"
   const [customer, setCustomer] = useState("");
   const [date, setDate] = useState(today());
+  const [transportBy, setTransportBy] = useState("");
 
   const suggestedChallan = (() => {
     const last = state.stock
@@ -1459,10 +1491,13 @@ function SellTab({ state, update }) {
       s.stock = s.stock.map(r => {
         if (!selected.includes(r.id)) return r;
         const soldRate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
-        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate };
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined };
       });
       if (customer.trim() && !s.customers.includes(customer.trim())) {
         s.customers = [...(s.customers || []), customer.trim()].sort();
+      }
+      if (transportBy.trim() && !(s.transporters || []).includes(transportBy.trim())) {
+        s.transporters = [...(s.transporters || []), transportBy.trim()].sort();
       }
       // Save rate to customerData history if set
       if (!s.customerData) s.customerData = {};
@@ -1484,7 +1519,7 @@ function SellTab({ state, update }) {
       <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
       <div className="serif" style={{ fontSize: 28 }}>Sale Recorded</div>
       <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} reels · {fmt(done.wt)} kg · {done.val ? fmtRs(done.val) : "no rate set"} → {done.customer}</div>
-      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); }}>Record Another Sale</button>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); }}>Record Another Sale</button>
     </div>
   );
 
@@ -1511,6 +1546,10 @@ function SellTab({ state, update }) {
             <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
             <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313" />
           </div>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="lbl">Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+          <TransporterInput value={transportBy} onChange={setTransportBy} transporters={state.transporters || []} />
         </div>
       </div>
 
@@ -1607,7 +1646,7 @@ function SellTab({ state, update }) {
 // ─── LINER STOCK TAB ─────────────────────────────────────────────────────────
 function LinerStockTab({ state, update }) {
   const [view, setView] = useState("list");
-  const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today() });
+  const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today(), transportBy: "" });
   // Multi-reel conversion: map of reelId -> [{id, weight}]
   const [convReelWeights, setConvReelWeights] = useState({});
   const [selectedReelIds, setSelectedReelIds] = useState([]);
@@ -1687,17 +1726,21 @@ function LinerStockTab({ state, update }) {
           conversionDate: conversionForm.date, corrugator: conversionForm.corrugator,
           labourRate, costRate: effectiveCostRate,
           inwardDate: reel.inwardDate, supplier: reel.supplier, sold: false,
+          conversionTransportBy: conversionForm.transportBy.trim() || undefined,
         });
       });
     });
     update(s => {
       s.stock = s.stock.map(r => reelIdsToMark.includes(r.id) ? { ...r, converted: true, conversionBatchId: batchId, conversionDate: conversionForm.date } : r);
       s.stock = [...s.stock, ...allNewLiners];
+      if (conversionForm.transportBy.trim() && !(s.transporters || []).includes(conversionForm.transportBy.trim())) {
+        s.transporters = [...(s.transporters || []), conversionForm.transportBy.trim()].sort();
+      }
     });
     setConvSaved(true);
     setSelectedReelIds([]);
     setConvReelWeights({});
-    setConversionForm({ labourRate: "", corrugator: "", date: today() });
+    setConversionForm({ labourRate: "", corrugator: "", date: today(), transportBy: "" });
     setView("list");
     setTimeout(() => setConvSaved(false), 2500);
   };
@@ -1841,6 +1884,10 @@ function LinerStockTab({ state, update }) {
             <div><label className="lbl">Conversion Date</label>
               <input type="date" value={conversionForm.date} onChange={e => setConversionForm(f => ({ ...f, date: e.target.value }))} />
             </div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <label className="lbl">Transport By (reels to corrugator) <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+            <TransporterInput value={conversionForm.transportBy} onChange={v => setConversionForm(f => ({ ...f, transportBy: v }))} transporters={state.transporters || []} />
           </div>
         </div>
 
@@ -2144,6 +2191,7 @@ function LinerSellTab({ state, update }) {
   const [selected, setSelected] = useState([]);
   const [sellRate, setSellRate] = useState("");
   const [done, setDone] = useState(null);
+  const [transportBy, setTransportBy] = useState("");
 
   // Shared challan sequence across reels + liner
   const suggestedChallan = (() => {
@@ -2181,10 +2229,13 @@ function LinerSellTab({ state, update }) {
       s.stock = s.stock.map(r => {
         if (!selected.includes(r.id)) return r;
         const wt = pendingWeights[r.id] !== undefined ? pendingWeights[r.id] : r.weight;
-        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(sellRate) || 0, weight: wt };
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(sellRate) || 0, weight: wt, transportBy: transportBy.trim() || undefined };
       });
       if (customer.trim() && !(s.linerCustomers || []).includes(customer.trim())) {
         s.linerCustomers = [...(s.linerCustomers || []), customer.trim()].sort();
+      }
+      if (transportBy.trim() && !(s.transporters || []).includes(transportBy.trim())) {
+        s.transporters = [...(s.transporters || []), transportBy.trim()].sort();
       }
     });
     setDone({ count: selected.length, wt: effectiveWt, customer, val: effectiveValue });
@@ -2215,6 +2266,10 @@ function LinerSellTab({ state, update }) {
             <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
             <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 314" />
           </div>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="lbl">Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+          <TransporterInput value={transportBy} onChange={setTransportBy} transporters={state.transporters || []} />
         </div>
       </div>
 
@@ -2320,13 +2375,15 @@ function HistoryTab({ state, update }) {
   const [filterSize, setFilterSize] = useState("");
   const [filterGrade, setFilterGrade] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
-  const [custView, setCustView] = useState("challans"); // "challans" | "customers" | "customerDetail"
+  const [custView, setCustView] = useState("challans"); // "challans" | "customers" | "customerDetail" | "transporters" | "transporterDetail"
   const [selCustomer, setSelCustomer] = useState("");
   const [custSearch, setCustSearch] = useState("");
   const [ledgerTab, setLedgerTab] = useState("overview"); // "overview"|"rates"|"history"
   const [bulkForm, setBulkForm] = useState({ grade: "", rate: "", fromDate: "", toDate: today() });
   const [bulkPreview, setBulkPreview] = useState(null);
   const [bulkDone, setBulkDone] = useState(false);
+  const [selTransporter, setSelTransporter] = useState("");
+  const [transporterMonth, setTransporterMonth] = useState("");
 
   const sold = state.stock.filter(r => r.sold);
   const challanMap = {};
@@ -2421,6 +2478,177 @@ function HistoryTab({ state, update }) {
     setConfirmDeleteChallan(null);
     setOpenChallan(null);
   };
+
+  // ── TRANSPORTER LIST VIEW ──
+  if (custView === "transporters") {
+    const transporterNames = state.transporters || [];
+    // Build trips from all sold stock + conversions
+    const allTrips = [
+      ...state.stock.filter(r => r.sold && r.transportBy).map(r => ({
+        type: "sale", transporter: r.transportBy, date: r.soldDate,
+        challanNo: r.soldChallanNo, customer: r.soldTo, weight: Number(r.weight),
+        id: r.id,
+      })),
+      // Conversion trips (deduplicated by conversionBatchId)
+      ...Object.values(state.stock.filter(r => r.productType === "liner" && r.conversionTransportBy && r.conversionBatchId)
+        .reduce((acc, r) => {
+          if (!acc[r.conversionBatchId]) acc[r.conversionBatchId] = { type: "conversion", transporter: r.conversionTransportBy, date: r.conversionDate, batchId: r.conversionBatchId, corrugator: r.corrugator, weight: 0 };
+          acc[r.conversionBatchId].weight += Number(r.weight);
+          return acc;
+        }, {})),
+    ];
+    const tripsByTransporter = {};
+    allTrips.forEach(t => {
+      if (!tripsByTransporter[t.transporter]) tripsByTransporter[t.transporter] = [];
+      tripsByTransporter[t.transporter].push(t);
+    });
+    const transporterList = [...new Set([...transporterNames, ...allTrips.map(t => t.transporter)])].sort();
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setCustView("challans")}>← Back</button>
+          <div><div className="section-eyebrow">Logistics</div><h2>Transporter Ledger</h2></div>
+        </div>
+        {transporterList.length === 0 ? (
+          <div className="card" style={{ textAlign: "center", padding: 40 }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>🚚</div>
+            <div className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No transporters yet.</div>
+            <div style={{ fontSize: 12, color: "#c0b8ac", marginTop: 6 }}>Add transport details when recording sales or conversions.</div>
+          </div>
+        ) : transporterList.map(name => {
+          const trips = (tripsByTransporter[name] || []).sort((a, b) => new Date(b.date) - new Date(a.date));
+          const monthMap = {};
+          trips.forEach(t => { const m = monthKey(t.date); monthMap[m] = (monthMap[m] || 0) + 1; });
+          const thisMonth = monthKey(today());
+          const lastMonth = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+          return (
+            <div key={name} className="card" style={{ cursor: "pointer" }}
+              onClick={() => { setSelTransporter(name); setCustView("transporterDetail"); setTransporterMonth(""); }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 40, height: 40, background: "#1a1a1a", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🚚</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{trips.length} trip{trips.length !== 1 ? "s" : ""} total</div>
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "#6a6050" }}>This month: <strong>{monthMap[thisMonth] || 0}</strong></div>
+                  <div style={{ fontSize: 11, color: "#9a9080" }}>Last month: <strong>{monthMap[lastMonth] || 0}</strong></div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── TRANSPORTER DETAIL VIEW ──
+  if (custView === "transporterDetail" && selTransporter) {
+    const allTrips = [
+      ...state.stock.filter(r => r.sold && r.transportBy === selTransporter).map(r => ({
+        type: "sale", transporter: r.transportBy, date: r.soldDate,
+        challanNo: r.soldChallanNo, customer: r.soldTo, weight: Number(r.weight), id: r.id,
+      })),
+      ...Object.values(state.stock.filter(r => r.productType === "liner" && r.conversionTransportBy === selTransporter && r.conversionBatchId)
+        .reduce((acc, r) => {
+          if (!acc[r.conversionBatchId]) acc[r.conversionBatchId] = { type: "conversion", transporter: r.conversionTransportBy, date: r.conversionDate, batchId: r.conversionBatchId, corrugator: r.corrugator, weight: 0 };
+          acc[r.conversionBatchId].weight += Number(r.weight);
+          return acc;
+        }, {})),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const allMonths = [...new Set(allTrips.map(t => monthKey(t.date)))].sort().reverse();
+    const filtered = transporterMonth ? allTrips.filter(t => monthKey(t.date) === transporterMonth) : allTrips;
+
+    // Period counts
+    const now = new Date();
+    const todayStr = today();
+    const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const tripsToday = allTrips.filter(t => t.date === todayStr).length;
+    const tripsWeek = allTrips.filter(t => new Date(t.date) >= weekAgo).length;
+    const tripsMonth = allTrips.filter(t => monthKey(t.date) === monthStr).length;
+    const totalKgMonth = allTrips.filter(t => monthKey(t.date) === monthStr).reduce((s, t) => s + (t.weight || 0), 0);
+
+    // Deduplicate trips by challan for sales
+    const challanTrips = {};
+    filtered.forEach(t => {
+      if (t.type === "sale") {
+        const k = t.challanNo || `${t.date}|${t.customer}`;
+        if (!challanTrips[k]) challanTrips[k] = { ...t, weight: 0 };
+        challanTrips[k].weight += t.weight;
+      }
+    });
+    const uniqueTrips = [
+      ...Object.values(challanTrips),
+      ...filtered.filter(t => t.type === "conversion"),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setCustView("transporters")}>← Transporters</button>
+          <div><div className="section-eyebrow">Transporter</div><h2>{selTransporter}</h2></div>
+        </div>
+        {/* Summary stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10 }}>
+          {[
+            { label: "Today", val: tripsToday, sub: "trips" },
+            { label: "This Week", val: tripsWeek, sub: "trips" },
+            { label: "This Month", val: tripsMonth, sub: `trips · ${fmt(Math.round(totalKgMonth))} kg` },
+            { label: "All Time", val: allTrips.length, sub: "trips" },
+          ].map(s => (
+            <div key={s.label} className="card" style={{ padding: "12px 14px", textAlign: "center" }}>
+              <div className="lbl">{s.label}</div>
+              <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.1 }}>{s.val}</div>
+              <div style={{ fontSize: 10, color: "#9a9080", marginTop: 3 }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+        {/* Month filter */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "#9a9080" }}>Filter month:</span>
+          <button onClick={() => setTransporterMonth("")} className={`btn btn-sm ${!transporterMonth ? "btn-dark" : "btn-outline"}`}>All</button>
+          {allMonths.map(m => (
+            <button key={m} onClick={() => setTransporterMonth(m)} className={`btn btn-sm ${transporterMonth === m ? "btn-dark" : "btn-outline"}`}>{monthLabel(m)}</button>
+          ))}
+        </div>
+        {/* Trip ledger */}
+        <div className="card-flat">
+          <div style={{ display: "flex", alignItems: "center", background: "#f5f0e8", borderBottom: "1px solid #e8e2d8", padding: "6px 12px" }}>
+            <div style={{ flex: 1, fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.07em" }}>Date · Type</div>
+            <div style={{ width: 80, fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.07em" }}>Details</div>
+            <div style={{ width: 60, fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "right" }}>Weight</div>
+          </div>
+          {uniqueTrips.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#b0a898", fontSize: 13 }}>No trips in selected period.</div>
+          ) : uniqueTrips.map((t, i) => (
+            <div key={t.batchId || t.challanNo || i} style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderBottom: i < uniqueTrips.length - 1 ? "1px solid #f0ece4" : "none" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>{fmtDate(t.date)}</div>
+                <div style={{ fontSize: 10, color: "#9a9080", marginTop: 1 }}>
+                  {t.type === "sale" ? <span style={{ color: "#8b6914" }}>🏷 Sale{t.challanNo ? ` · CH ${t.challanNo}` : ""}</span> : <span style={{ color: "#2d6a4f" }}>🔄 Conversion{t.corrugator ? ` · ${t.corrugator}` : ""}</span>}
+                </div>
+              </div>
+              <div style={{ width: 80, fontSize: 12, color: "#6a6050", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {t.type === "sale" ? (t.customer || "—") : (t.corrugator || "—")}
+              </div>
+              <div style={{ width: 60, textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(t.weight))} <span style={{ fontSize: 9, fontWeight: 400, color: "#9a9080" }}>kg</span></div>
+            </div>
+          ))}
+          {uniqueTrips.length > 0 && (
+            <div style={{ padding: "10px 12px", background: "#f5f0e8", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: "#6a6050" }}>
+              <span>{uniqueTrips.length} trip{uniqueTrips.length !== 1 ? "s" : ""} {transporterMonth ? `in ${monthLabel(transporterMonth)}` : ""}</span>
+              <span>{fmt(Math.round(uniqueTrips.reduce((s, t) => s + (t.weight || 0), 0)))} kg</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // ── CUSTOMER LIST VIEW ──
   if (custView === "customers") return (
@@ -2748,7 +2976,10 @@ function HistoryTab({ state, update }) {
       ) : (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div><div className="section-eyebrow">Records</div><h2>Sales History</h2></div>
-          <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>👥 Customers</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-outline btn-sm" onClick={() => setCustView("transporters")}>🚚 Transport</button>
+            <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>👥 Customers</button>
+          </div>
         </div>
       )}
       {/* Filter bar */}
@@ -2801,11 +3032,9 @@ function HistoryTab({ state, update }) {
         <div className="card-flat">
           {/* Column header row */}
           <div style={{ display: "flex", alignItems: "center", background: "#f5f0e8", borderBottom: "1px solid #e8e2d8" }}>
-            <div style={{ width: 56, flexShrink: 0, padding: "6px 4px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>Ch#</div>
-            <div style={{ flex: "0 0 auto", width: "clamp(100px, 28%, 200px)", padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", borderLeft: "1px solid #e8e2d8" }}>Customer</div>
-            <div style={{ flex: "0 0 auto", width: 80, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "right", borderLeft: "1px solid #e8e2d8" }}>Weight</div>
-            <div style={{ flex: "1 1 80px", minWidth: 0, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", borderLeft: "1px solid #e8e2d8" }}>Date</div>
-            <div style={{ flex: "0 0 auto", width: 80, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "right", borderLeft: "1px solid #e8e2d8" }}>Value</div>
+            <div style={{ width: 52, flexShrink: 0, padding: "6px 4px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>CH#</div>
+            <div style={{ flex: 1, padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", borderLeft: "1px solid #e8e2d8" }}>Customer · Date</div>
+            <div style={{ flex: "0 0 auto", width: 70, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "right", borderLeft: "1px solid #e8e2d8" }}>Wt · Value</div>
             <div style={{ width: 28, flexShrink: 0 }} />
           </div>
           {challans.map((ch, idx) => {
@@ -2825,31 +3054,24 @@ function HistoryTab({ state, update }) {
                   style={{ padding: "0", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "stretch", transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
                   onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#faf8f4"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
-                  {/* Challan No block — leftmost colour column */}
-                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#1a1a1a" : "#e8e2d8", borderRadius: "0", width: 56, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
+                  {/* Challan No block */}
+                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#1a1a1a" : "#e8e2d8", width: 52, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
                     <div style={{ fontSize: 8, color: ch.challanNo ? "#7a7060" : "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>CH</div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: ch.challanNo ? "#fff" : "#b0a898", lineHeight: 1.1, fontFamily: "'DM Sans', sans-serif", textAlign: "center", wordBreak: "break-all" }}>{ch.challanNo || "—"}</div>
                   </div>
-                  {/* Customer name column */}
-                  <div style={{ flex: "0 0 auto", width: "clamp(100px, 28%, 200px)", padding: "10px 10px", display: "flex", flexDirection: "column", justifyContent: "center", borderLeft: "1px solid #e8e2d8" }}>
+                  {/* Customer + date — middle flex column */}
+                  <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, borderLeft: "1px solid #e8e2d8" }}>
                     <div style={{ fontWeight: 600, fontSize: 13, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {ch.customer || "—"}
+                      {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a", marginLeft: 5 }}>Liner</span>}
                     </div>
-                    {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a", marginTop: 2, display: "inline-block", width: "fit-content" }}>Liner</span>}
+                    <div style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(ch.date)} · {ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</div>
+                    {ch.reels[0]?.transportBy && <div style={{ fontSize: 10, color: "#6a6050" }}>🚚 {ch.reels[0].transportBy}</div>}
                   </div>
-                  {/* Weight column */}
-                  <div style={{ flex: "0 0 auto", width: 80, padding: "10px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", borderLeft: "1px solid #e8e2d8" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))}</div>
-                    <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
-                  </div>
-                  {/* Date column — hidden on very small screens via inline media-like flex */}
-                  <div style={{ flex: "1 1 80px", minWidth: 0, padding: "10px 8px", display: "flex", flexDirection: "column", justifyContent: "center", borderLeft: "1px solid #e8e2d8" }}>
-                    <div style={{ fontSize: 11, color: "#6a6050", whiteSpace: "nowrap" }}>{fmtDate(ch.date)}</div>
-                    <div style={{ fontSize: 10, color: "#b0a898", marginTop: 1 }}>{ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</div>
-                  </div>
-                  {/* Value column */}
-                  <div style={{ flex: "0 0 auto", width: 80, padding: "10px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", borderLeft: "1px solid #e8e2d8" }}>
-                    {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <span style={{ fontSize: 12, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span> : <span style={{ fontSize: 9, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 4px", color: "#a05800", fontWeight: 600, textAlign: "center" }}>no rate</span>; })()}
+                  {/* Weight + value — right column */}
+                  <div style={{ flexShrink: 0, width: 70, padding: "8px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 3, borderLeft: "1px solid #e8e2d8" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>kg</span></div>
+                    {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span> : <span style={{ fontSize: 9, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 4px", color: "#a05800", fontWeight: 600 }}>no rate</span>; })()}
                   </div>
                   {/* Expand arrow */}
                   <div style={{ flexShrink: 0, width: 28, display: "flex", alignItems: "center", justifyContent: "center", color: "#c8b89a", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
@@ -3024,8 +3246,11 @@ function HistoryTab({ state, update }) {
                               </div>
                             );
                           })}
-                          <div style={{ paddingTop: 10, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-                            <span style={{ color: "#9a9080" }}>{ch.reels.length} reels · {fmt(Math.round(totalWt))} kg</span>
+                          <div style={{ paddingTop: 10, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, flexWrap: "wrap", gap: 6 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              <span style={{ color: "#9a9080" }}>{ch.reels.length} reels · {fmt(Math.round(totalWt))} kg</span>
+                              {ch.reels[0]?.transportBy && <span style={{ fontSize: 11, color: "#6a6050" }}>🚚 {ch.reels[0].transportBy}</span>}
+                            </div>
                             <span style={{ fontWeight: 700, color: "#1a1a1a", fontSize: 15 }}>
                               {challanVal > 0 ? fmtRs(challanVal) : <span style={{ color: "#b0a898", fontStyle: "italic", fontSize: 12 }}>Add ₹/kg to see total</span>}
                             </span>
@@ -3245,6 +3470,13 @@ function ReelReport({ state, soldData }) {
   const sizeRowTotals = {}; allSoldSizes.forEach(sz => { sizeRowTotals[sz] = { reels: 0, kg: 0 }; crossGradeLabels.forEach(gk => { sizeRowTotals[sz].reels += crossTab[sz]?.[gk]?.reels || 0; sizeRowTotals[sz].kg += crossTab[sz]?.[gk]?.kg || 0; }); });
   const gradeColTotals = {}; crossGradeLabels.forEach(gk => { gradeColTotals[gk] = { reels: 0, kg: 0 }; allSoldSizes.forEach(sz => { gradeColTotals[gk].reels += crossTab[sz]?.[gk]?.reels || 0; gradeColTotals[gk].kg += crossTab[sz]?.[gk]?.kg || 0; }); });
 
+  const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
+  const totalCost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+  const totalProfit = totalRevenue - totalCost;
+  const avgRatePerKg = totalKg > 0 ? totalRevenue / totalKg : 0;
+  const topGrade = Object.entries(gradeMap).sort((a, b) => b[1].kg - a[1].kg)[0];
+  const topSize = topSizes[0];
+
   if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No reel sales yet.</span></div>;
 
   return (
@@ -3265,6 +3497,34 @@ function ReelReport({ state, soldData }) {
           </div>
         ))}
       </div>
+      {/* Key Insights */}
+      {periodSold.length > 0 && (
+        <div className="card" style={{ background: "linear-gradient(135deg, #1a1a1a 0%, #2a2420 100%)", border: "none" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#7a7060", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 14 }}>⚡ Key Insights — {periodLabel}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {avgRatePerKg > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#b0a898" }}>Avg selling rate</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#e8c84a" }}>{fmtRate(avgRatePerKg)}/kg</span>
+            </div>}
+            {topGrade && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#b0a898" }}>Top grade by volume</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{topGrade[0]} <span style={{ fontSize: 11, color: "#9a9080" }}>({fmt(Math.round(topGrade[1].kg))} kg)</span></span>
+            </div>}
+            {topSize && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#b0a898" }}>Most sold size</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{topSize[0]}" <span style={{ fontSize: 11, color: "#9a9080" }}>({topSize[1]} reels)</span></span>
+            </div>}
+            {top5Cust[0] && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#b0a898" }}>Top customer</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{top5Cust[0][0]} <span style={{ fontSize: 11, color: "#9a9080" }}>({fmt(Math.round(top5Cust[0][1].kg))} kg)</span></span>
+            </div>}
+            {totalProfit > 0 && totalKg > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(45,106,79,0.25)", borderRadius: 8, border: "1px solid rgba(45,106,79,0.4)" }}>
+              <span style={{ fontSize: 12, color: "#7ecfa0" }}>Profit per kg</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#7ecfa0" }}>{fmtRate(totalProfit / totalKg)}/kg</span>
+            </div>}
+          </div>
+        </div>
+      )}
       {/* Monthly trend */}
       {trendData.length > 1 && (
         <div className="card">
@@ -3450,6 +3710,45 @@ function LinerReport({ state, soldData }) {
           </div>
         ))}
       </div>
+      {/* Key Insights */}
+      {periodSold.length > 0 && (() => {
+        const avgRate = totalKg > 0 ? totalRevenue / totalKg : 0;
+        const topSpec = Object.entries(specMap).sort((a, b) => b[1].kg - a[1].kg)[0];
+        const topCust = top5Cust[0];
+        const inwardLiners = periodSold.filter(r => r.linerSource === "inward");
+        const convertedLiners = periodSold.filter(r => r.linerSource !== "inward");
+        return (
+          <div className="card" style={{ background: "linear-gradient(135deg, #0f2a20 0%, #1a3428 100%)", border: "none" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#4a8060", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 14 }}>⚡ Key Insights — {periodLabel}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {avgRate > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "#7ecfa0" }}>Avg selling rate</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#e8c84a" }}>{fmtRate(avgRate)}/kg</span>
+              </div>}
+              {topSpec && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "#7ecfa0" }}>Top liner spec</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{topSpec[0]} <span style={{ fontSize: 11, color: "#5a9070" }}>({fmt(Math.round(topSpec[1].kg))} kg)</span></span>
+              </div>}
+              {topCust && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "#7ecfa0" }}>Top customer</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{topCust[0]} <span style={{ fontSize: 11, color: "#5a9070" }}>({fmt(Math.round(topCust[1].kg))} kg)</span></span>
+              </div>}
+              {(inwardLiners.length > 0 || convertedLiners.length > 0) && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "#7ecfa0" }}>Source mix</span>
+                <span style={{ fontSize: 12, color: "#fff" }}>
+                  {convertedLiners.length > 0 && <span>{convertedLiners.length} converted</span>}
+                  {inwardLiners.length > 0 && convertedLiners.length > 0 && <span style={{ color: "#5a9070" }}> · </span>}
+                  {inwardLiners.length > 0 && <span>{inwardLiners.length} bought</span>}
+                </span>
+              </div>}
+              {totalProfit > 0 && totalKg > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(45,106,79,0.25)", borderRadius: 8, border: "1px solid rgba(45,106,79,0.4)" }}>
+                <span style={{ fontSize: 12, color: "#7ecfa0" }}>Profit per kg</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#7ecfa0" }}>{fmtRate(totalProfit / totalKg)}/kg</span>
+              </div>}
+            </div>
+          </div>
+        );
+      })()}
       {/* Labour cost card */}
       {totalLabour > 0 && (
         <div className="card" style={{ background: "#f0f7f4", border: "1.5px solid #b5dcc0" }}>
