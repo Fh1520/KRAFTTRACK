@@ -255,9 +255,9 @@ export default function App() {
     const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
     if (!sizeCountMap[k]) sizeCountMap[k] = { count: 0, bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size };
   });
-  available.forEach(r => {
+  available.filter(r => isPriority(r.bf, r.gsm)).forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
-    sizeCountMap[k].count++;
+    if (sizeCountMap[k]) sizeCountMap[k].count++;
   });
   const lowItems = Object.values(sizeCountMap).filter(x => x.count <= 2).sort((a, b) => Number(a.size) - Number(b.size));
   const moderateItems = Object.values(sizeCountMap).filter(x => x.count === 3).sort((a, b) => Number(a.size) - Number(b.size));
@@ -401,10 +401,9 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
     if (!bySpec[k]) bySpec[k] = { bf: r.bf, gsm: r.gsm, shade: r.shade, reels: 0, kg: 0, sizes: {} };
     if (bySpec[k].sizes[r.size] === undefined) bySpec[k].sizes[r.size] = 0;
   });
-  available.forEach(r => {
+  available.filter(r => isPriority(r.bf, r.gsm)).forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
-    bySpec[k].reels++; bySpec[k].kg += Number(r.weight);
-    bySpec[k].sizes[r.size]++;
+    if (bySpec[k]) { bySpec[k].reels++; bySpec[k].kg += Number(r.weight); bySpec[k].sizes[r.size]++; }
   });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
