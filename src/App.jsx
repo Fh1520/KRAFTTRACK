@@ -3440,9 +3440,6 @@ function ReelReport({ state, soldData }) {
   const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
   const last6 = allMonths.slice(0, 6).reverse();
   const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0) }));
-  const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
-  const totalCost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
-  const totalProfit = totalRevenue - totalCost;
 
   // Turnaround
   const turnReels = sold.filter(r => r.inwardDate && r.soldDate);
@@ -3478,11 +3475,6 @@ function ReelReport({ state, soldData }) {
   const topSize = topSizes[0];
 
   if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No reel sales yet.</span></div>;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <PeriodBar />
-      {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
         {[
           { label: "Reels Sold", val: periodSold.length, unit: "reels" },
