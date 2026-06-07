@@ -67,6 +67,8 @@ function monthKey(d) { return d ? d.slice(0, 7) : ""; }
 function monthLabel(k) { if (!k) return ""; const [y, m] = k.split("-"); return new Date(y, m - 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" }); }
 
 const TABS = ["Home", "Stock", "Sell", "History", "Reports", "Settings"];
+const EMPLOYEE_TABS = ["Home", "Stock"];
+const IS_EMPLOYEE_VIEW = new URLSearchParams(window.location.search).get("view") === "stock";
 
 // ─── CHART HELPERS ────────────────────────────────────────────────────────────
 const CHART_COLORS = ["#2d2d2d", "#8b6914", "#5a8a5a", "#5a6a8a", "#8a4a4a", "#6a5a8a", "#8a7a3a", "#3a7a8a"];
@@ -277,12 +279,12 @@ export default function App() {
     });
   }, []);
 
-  const available = state.stock.filter(r => !r.sold && r.productType !== "liner");
+  const available = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
   const totalKg = available.reduce((s, r) => s + Number(r.weight), 0);
 
   const sizeCountMap = {};
-  // Seed from priority-grade reel stock only for low/moderate alerts
-  state.stock.filter(r => r.productType !== "liner" && isPriority(r.bf, r.gsm)).forEach(r => {
+  // Seed from priority-grade reel stock only for low/moderate alerts (exclude converted)
+  state.stock.filter(r => r.productType !== "liner" && !r.converted && isPriority(r.bf, r.gsm)).forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
     if (!sizeCountMap[k]) sizeCountMap[k] = { count: 0, bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size };
   });
@@ -386,9 +388,10 @@ export default function App() {
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 13, fontWeight: 500, color: "#1a1a1a", whiteSpace: "nowrap" }}>SK Traders</span>
           </div>
           <div style={{ display: "flex", overflowX: "auto", flex: 1, scrollbarWidth: "none" }}>
-            {TABS.map(t => (
+            {(IS_EMPLOYEE_VIEW ? EMPLOYEE_TABS : TABS).map(t => (
               <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#8b6914" : "transparent"}`, padding: "13px 11px", fontSize: 12, fontWeight: tab === t ? 600 : 400, color: tab === t ? "#1a1a1a" : "#9a9080", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
             ))}
+            {IS_EMPLOYEE_VIEW && <span style={{ fontSize: 9, color: "#b0a898", padding: "0 8px", alignSelf: "center", border: "1px solid #e8e2d8", borderRadius: 4, marginLeft: 4 }}>Stock View</span>}
           </div>
           <div className="nav-sync-text" style={{ fontSize: 10, color: saveError ? "#b83020" : "#b0a898", paddingLeft: 14, whiteSpace: "nowrap", display: "flex", alignItems: "center", flexShrink: 0 }}>
             {syncing
@@ -411,23 +414,23 @@ export default function App() {
       </nav>
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in">
-        {tab === "Home"     && <HomeTab     state={state} setTab={setTab} setStockNav={setStockNav} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} />}
-        {tab === "Stock"    && <StockTab    state={state} update={update} stockNav={stockNav} clearStockNav={() => setStockNav(null)} />}
-        {tab === "Sell"     && <SellTab     state={state} update={update} />}
-        {tab === "History"  && <HistoryTab  state={state} update={update} />}
-        {tab === "Reports"  && <ReportsTab  state={state} />}
-        {tab === "Settings" && <SettingsTab state={state} update={update} />}
+        {tab === "Home"     && <HomeTab     state={state} setTab={setTab} setStockNav={setStockNav} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} isEmployee={IS_EMPLOYEE_VIEW} />}
+        {tab === "Stock"    && <StockTab    state={state} update={update} stockNav={stockNav} clearStockNav={() => setStockNav(null)} isEmployee={IS_EMPLOYEE_VIEW} />}
+        {!IS_EMPLOYEE_VIEW && tab === "Sell"     && <SellTab     state={state} update={update} />}
+        {!IS_EMPLOYEE_VIEW && tab === "History"  && <HistoryTab  state={state} update={update} />}
+        {!IS_EMPLOYEE_VIEW && tab === "Reports"  && <ReportsTab  state={state} />}
+        {!IS_EMPLOYEE_VIEW && tab === "Settings" && <SettingsTab state={state} update={update} />}
       </div>
     </div>
   );
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available }) {
+function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available, isEmployee }) {
   const sold = state.stock.filter(r => r.sold && r.productType !== "liner");
   const bySpec = {};
-  // Only show priority grades on home screen
-  state.stock.filter(r => r.productType !== "liner" && isPriority(r.bf, r.gsm)).forEach(r => {
+  // Only show priority grades on home screen, exclude converted-to-liner reels
+  state.stock.filter(r => r.productType !== "liner" && !r.converted && isPriority(r.bf, r.gsm)).forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
     if (!bySpec[k]) bySpec[k] = { bf: r.bf, gsm: r.gsm, shade: r.shade, reels: 0, kg: 0, sizes: {} };
     if (bySpec[k].sizes[r.size] === undefined) bySpec[k].sizes[r.size] = 0;
@@ -450,7 +453,7 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
         {[
           { label: "Available Reels", val: available.length, unit: "in stock" },
           { label: "Total Weight", val: (totalKg / 1000).toFixed(2), unit: "metric tons" },
-          { label: "Total Sold", val: sold.length, unit: "reels dispatched" },
+          ...(!isEmployee ? [{ label: "Total Sold", val: sold.length, unit: "reels dispatched" }] : []),
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: "22px 24px" }}>
             <div className="lbl">{s.label}</div>
@@ -586,7 +589,7 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {grp.sizes.sort((a, b) => Number(a.size) - Number(b.size)).map(x => (
-                    <div key={x.size} onClick={() => setTab("Stock")}
+                    <div key={x.size} onClick={() => { setTab("Stock"); setStockNav({ linerTab: true }); }}
                       style={{ background: "#f0f8f4", border: "1px solid #b5dcc0", borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s" }}
                       onMouseEnter={e => e.currentTarget.style.transform = "scale(1.05)"}
                       onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
@@ -799,7 +802,7 @@ function SizeOutwardHistory({ sz, challanList }) {
 
 // ─── BULK IMPORT ─────────────────────────────────────────────────────────────
 // ─── STOCK (INWARD) ───────────────────────────────────────────────────────────
-function StockTab({ state, update, stockNav, clearStockNav }) {
+function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   const [productTab, setProductTab] = useState("reels"); // "reels" | "liner"
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState({ bf: "", gsm: "", shade: "", size: "", showSold: false });
@@ -812,6 +815,10 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
     if (stockNav?.size) {
       setFilter(f => ({ ...f, size: stockNav.size }));
       setView("size");
+      clearStockNav();
+    }
+    if (stockNav?.linerTab) {
+      setProductTab("liner");
       clearStockNav();
     }
   }, [stockNav]);
@@ -1020,13 +1027,14 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
 
   if (view === "size") {
     const sz = filter.size;
-    const allForSize = state.stock.filter(r => r.size === sz);
+    // Only show actual reels (not liners, not converted-to-liner reels)
+    const allForSize = state.stock.filter(r => r.size === sz && r.productType !== "liner" && !r.converted);
     // Build separate data per grade so stock/inward/outward are never mixed
     const gradeKeys = [...new Set(allForSize.map(r => `${r.bf}|${r.gsm}|${r.shade}`))].sort();
     const gradeData = gradeKeys.map(gk => {
       const [bf, gsm, shade] = gk.split("|");
       const gradeReels = allForSize.filter(r => r.bf === bf && r.gsm === gsm && r.shade === shade);
-      const availForGrade = gradeReels.filter(r => !r.sold);
+      const availForGrade = gradeReels.filter(r => !r.sold && !r.converted);
       const soldForGrade = gradeReels.filter(r => r.sold).sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate));
       const inwardGroups = {};
       gradeReels.forEach(r => {
@@ -1326,7 +1334,7 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
 
   // ── LINER LIST VIEW ──
   if (productTab === "liner") {
-    return <LinerStockTab state={state} update={update} />;
+    return <LinerStockTab state={state} update={update} isEmployee={isEmployee} />;
   }
 
   return (
@@ -1342,10 +1350,10 @@ function StockTab({ state, update, stockNav, clearStockNav }) {
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Inventory</div><h2>Stock Register</h2></div>
-        <div style={{ display: "flex", gap: 8 }}>
+        {!isEmployee && <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("inward")}>📋 Inward History</button>
           <button className="btn btn-dark" onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
-        </div>
+        </div>}
       </div>
       <div className="card" style={{ padding: "14px 20px" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -1644,7 +1652,7 @@ function SellTab({ state, update }) {
 }
 
 // ─── LINER STOCK TAB ─────────────────────────────────────────────────────────
-function LinerStockTab({ state, update }) {
+function LinerStockTab({ state, update, isEmployee }) {
   const [view, setView] = useState("list");
   const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today(), transportBy: "" });
   // Multi-reel conversion: map of reelId -> [{id, weight}]
@@ -2075,9 +2083,9 @@ function LinerStockTab({ state, update }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>
-          <button className="btn btn-outline" onClick={() => setView("linerInward")}>+ Add Liner Inward</button>
-          {availableReels.length > 0 && (
+          {!isEmployee && <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>}
+          {!isEmployee && <button className="btn btn-outline" onClick={() => setView("linerInward")}>+ Add Liner Inward</button>}
+          {!isEmployee && availableReels.length > 0 && (
             <button className="btn btn-dark" onClick={() => setView("convert")}>🔄 Convert Reels</button>
           )}
         </div>
