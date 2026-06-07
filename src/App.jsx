@@ -388,43 +388,21 @@ export default function App() {
   );
 }
 
-// Priority grades shown on home screen
-const PRIORITY_GRADES = [{ bf: "18", gsm: "150" }, { bf: "22", gsm: "180" }];
-const isPriorityGrade = (bf, gsm) => PRIORITY_GRADES.some(g => g.bf === bf && g.gsm === gsm);
-
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available }) {
-  // Priority reels only (18BF 150GSM and 22BF 180GSM)
-  const priorityAvailable = available.filter(r => r.productType !== "liner" && isPriorityGrade(r.bf, r.gsm));
-  const priorityKg = priorityAvailable.reduce((s, r) => s + Number(r.weight), 0);
-  const sold = state.stock.filter(r => r.sold && r.productType !== "liner" && isPriorityGrade(r.bf, r.gsm));
-
+  const sold = state.stock.filter(r => r.sold && r.productType !== "liner");
   const bySpec = {};
-  // Seed all known grade+size combos for PRIORITY grades only
-  state.stock.filter(r => r.productType !== "liner" && isPriorityGrade(r.bf, r.gsm)).forEach(r => {
+  // Seed all known grade+size combos so sold-out sizes show as 0 (reels only)
+  state.stock.filter(r => r.productType !== "liner").forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
     if (!bySpec[k]) bySpec[k] = { bf: r.bf, gsm: r.gsm, shade: r.shade, reels: 0, kg: 0, sizes: {} };
     if (bySpec[k].sizes[r.size] === undefined) bySpec[k].sizes[r.size] = 0;
   });
-  priorityAvailable.forEach(r => {
+  available.forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
-    if (bySpec[k]) { bySpec[k].reels++; bySpec[k].kg += Number(r.weight); bySpec[k].sizes[r.size]++; }
+    bySpec[k].reels++; bySpec[k].kg += Number(r.weight);
+    bySpec[k].sizes[r.size]++;
   });
-
-  // Liner summary
-  const availableLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
-  const linerKg = availableLiners.reduce((s, r) => s + Number(r.weight), 0);
-  const linerGroups = {};
-  availableLiners.forEach(r => {
-    const k = `${r.bf}|${r.gsm}|${r.size}`;
-    if (!linerGroups[k]) linerGroups[k] = { bf: r.bf, gsm: r.gsm, size: r.size, count: 0, kg: 0 };
-    linerGroups[k].count++; linerGroups[k].kg += Number(r.weight);
-  });
-
-  // Low/moderate items only for priority grades
-  const priorityLowItems = lowItems.filter(x => isPriorityGrade(x.bf, x.gsm));
-  const priorityModerateItems = moderateItems.filter(x => isPriorityGrade(x.bf, x.gsm));
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10 }}>
@@ -437,8 +415,8 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
 
       <div className="g3">
         {[
-          { label: "Available Reels", val: priorityAvailable.length, unit: "in stock" },
-          { label: "Total Weight", val: (priorityKg / 1000).toFixed(2), unit: "metric tons" },
+          { label: "Available Reels", val: available.length, unit: "in stock" },
+          { label: "Total Weight", val: (totalKg / 1000).toFixed(2), unit: "metric tons" },
           { label: "Total Sold", val: sold.length, unit: "reels dispatched" },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: "22px 24px" }}>
@@ -449,15 +427,15 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
         ))}
       </div>
 
-      {priorityLowItems.length > 0 && (
+      {lowItems.length > 0 && (
         <div className="low-alert">
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <span style={{ fontSize: 15 }}>⚠️</span>
             <span className="serif" style={{ fontSize: 18 }}>Critical Low Stock</span>
-            <span className="tag tag-orange" style={{ marginLeft: 4 }}>{priorityLowItems.length} size{priorityLowItems.length > 1 ? "s" : ""} — 2 or fewer left</span>
+            <span className="tag tag-orange" style={{ marginLeft: 4 }}>{lowItems.length} size{lowItems.length > 1 ? "s" : ""} — 2 or fewer left</span>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {priorityLowItems.map(item => (
+            {lowItems.map(item => (
               <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1px solid #f0d5a0", borderRadius: 10, padding: "10px 16px", display: "flex", gap: 14, alignItems: "center" }}>
                 <div>
                   <div className="serif" style={{ fontSize: 26, lineHeight: 1, color: "#a05800" }}>{item.size}"</div>
@@ -473,15 +451,15 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
         </div>
       )}
 
-      {priorityModerateItems.length > 0 && (
+      {moderateItems.length > 0 && (
         <div className="moderate-alert">
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 14 }}>📦</span>
             <span className="serif" style={{ fontSize: 16 }}>Moderate Stock Notice</span>
-            <span className="tag tag-blue" style={{ marginLeft: 4 }}>{priorityModerateItems.length} size{priorityModerateItems.length > 1 ? "s" : ""} — 3 reels remaining</span>
+            <span className="tag tag-blue" style={{ marginLeft: 4 }}>{moderateItems.length} size{moderateItems.length > 1 ? "s" : ""} — 3 reels remaining</span>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {priorityModerateItems.map(item => (
+            {moderateItems.map(item => (
               <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1px solid #c8b89a", borderRadius: 8, padding: "8px 14px" }}>
                 <div className="serif" style={{ fontSize: 20, color: "#2d2d2d" }}>{item.size}"</div>
                 <div style={{ fontSize: 10, color: "#8a8070" }}>{item.bf} BF · {item.gsm} GSM</div>
@@ -515,59 +493,12 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
         </div>
       ))}
 
-      {state.stock.filter(r => r.productType !== "liner" && isPriorityGrade(r.bf, r.gsm)).length === 0 && availableLiners.length === 0 && (
+      {state.stock.length === 0 && (
         <div className="card" style={{ textAlign: "center", padding: 52 }}>
           <div style={{ fontSize: 40, marginBottom: 14 }}>📦</div>
           <div className="serif-italic" style={{ fontSize: 22, color: "#9a9080" }}>No stock yet.</div>
           <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>Go to Stock → Add Inward to get started.</div>
         </div>
-      )}
-
-      {/* ── LINER SECTION ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-        <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-        <span style={{ fontSize: 12, color: "#b0a898", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Liner Stock</span>
-        <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-      </div>
-
-      {availableLiners.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: 32 }}>
-          <div style={{ fontSize: 28, marginBottom: 10 }}>📄</div>
-          <div className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No liner stock.</div>
-          <div style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>Convert reels or add liner inward in Stock → Liner.</div>
-        </div>
-      ) : (
-        <>
-          <div className="g2">
-            <div className="card" style={{ padding: "18px 20px" }}>
-              <div className="lbl">Available Liners</div>
-              <div className="stat-num">{availableLiners.length}</div>
-              <div className="serif-italic" style={{ fontSize: 13, color: "#b0a898", marginTop: 4 }}>individual rolls</div>
-            </div>
-            <div className="card" style={{ padding: "18px 20px" }}>
-              <div className="lbl">Total Liner Weight</div>
-              <div className="stat-num">{(linerKg / 1000).toFixed(2)}</div>
-              <div className="serif-italic" style={{ fontSize: 13, color: "#b0a898", marginTop: 4 }}>metric tons</div>
-            </div>
-          </div>
-          <div className="card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <span className="serif" style={{ fontSize: 16 }}>Liner Availability by Spec</span>
-              <button onClick={() => setTab("Stock")} style={{ background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 6, padding: "4px 12px", fontSize: 11, cursor: "pointer" }}>View in Stock →</button>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {Object.values(linerGroups).sort((a, b) => Number(a.size) - Number(b.size)).map(grp => (
-                <div key={`${grp.bf}|${grp.gsm}|${grp.size}`}
-                  style={{ background: "#f4f7fb", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", textAlign: "center", minWidth: 80 }}>
-                  <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: "#1a1a1a" }}>{grp.size}"</div>
-                  <div style={{ fontSize: 10, color: "#8b6914", marginTop: 3, fontWeight: 600 }}>{grp.bf} BF · {grp.gsm} GSM</div>
-                  <div style={{ fontSize: 11, color: "#6a6050", marginTop: 4 }}>{grp.count} roll{grp.count !== 1 ? "s" : ""}</div>
-                  <div style={{ fontSize: 10, color: "#9a9080" }}>{fmt(Math.round(grp.kg))} kg</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
       )}
     </div>
   );
@@ -1613,44 +1544,6 @@ function LinerStockTab({ state, update }) {
   const [convFilter, setConvFilter] = useState({ bf: "", gsm: "", size: "" });
   const [convSaved, setConvSaved] = useState(false);
 
-  // ── LINER INWARD (pre-made purchase) state ──
-  const [inwardForm, setInwardForm] = useState({ supplier: "", invoiceNo: "", date: today(), bf: "", gsm: "", size: "" });
-  const [inwardLiners, setInwardLiners] = useState([]); // [{id, weight}]
-  const [inwardNewWeight, setInwardNewWeight] = useState("");
-  const [inwardRates, setInwardRates] = useState({ mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] });
-  const [inwardSaved, setInwardSaved] = useState(false);
-  const inwardWeightRef = useRef(null);
-  const LINER_BF_OPTS = ["14","16","18","20","22","24","26","28","30","32"];
-  const LINER_GSM_OPTS = ["80","90","100","110","120","130","140","150","160","170","180","190","200","210","220"];
-  const LINER_SIZE_OPTS = Array.from({ length: 50 }, (_, i) => String(10 + i)); // 10–59
-
-  const addInwardLiner = () => {
-    if (!inwardNewWeight || isNaN(inwardNewWeight)) return;
-    setInwardLiners(p => [...p, { id: genId(), weight: inwardNewWeight }]);
-    setInwardNewWeight("");
-    setTimeout(() => { inwardWeightRef.current?.focus(); }, 50);
-  };
-
-  const submitInward = () => {
-    if (!inwardForm.supplier || !inwardForm.bf || !inwardForm.gsm || !inwardForm.size || inwardLiners.length === 0) return;
-    const totalKg = inwardLiners.reduce((s, x) => s + Number(x.weight), 0);
-    const costRate = inwardRates.mode === "simple"
-      ? Number(inwardRates.rate) || 0
-      : computeWeightedCostRate(inwardRates.slabs, totalKg);
-    const newLiners = inwardLiners.map(lw => ({
-      id: genId(), productType: "liner",
-      bf: inwardForm.bf, gsm: inwardForm.gsm, size: inwardForm.size,
-      weight: lw.weight, costRate, labourRate: 0,
-      inwardDate: inwardForm.date, supplier: inwardForm.supplier, invoiceNo: inwardForm.invoiceNo,
-      sold: false, source: "purchased",
-    }));
-    update(s => { s.stock = [...s.stock, ...newLiners]; });
-    setInwardSaved(true);
-    setInwardLiners([]);
-    setInwardRates({ mode: "simple", rate: "", slabs: [{ kg: "", rate: "" }] });
-    setTimeout(() => { setInwardSaved(false); setView("list"); }, 1800);
-  };
-
   const availableReels = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
   const availableLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
   const allLiners = state.stock.filter(r => r.productType === "liner");
@@ -1734,128 +1627,6 @@ function LinerStockTab({ state, update }) {
     setView("list");
     setTimeout(() => setConvSaved(false), 2500);
   };
-
-  // ── LINER INWARD VIEW ──
-  if (view === "addInward") {
-    const totalInwardWt = inwardLiners.reduce((s, x) => s + (Number(x.weight) || 0), 0);
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 140 }} className="fade-in">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
-          <div><div className="section-eyebrow">Liner</div><h2>Add Liner Inward</h2></div>
-        </div>
-        {inwardSaved && <div className="ok-box">✓ Liner inward saved!</div>}
-        <div className="card">
-          <h3>Supplier & Spec</h3>
-          <div className="g3">
-            <div><label className="lbl">Supplier Name</label><input value={inwardForm.supplier} onChange={e => setInwardForm(f => ({ ...f, supplier: e.target.value }))} placeholder="e.g. Ravi Corrugators" /></div>
-            <div><label className="lbl">Invoice / Note No</label><input value={inwardForm.invoiceNo} onChange={e => setInwardForm(f => ({ ...f, invoiceNo: e.target.value }))} placeholder="Optional" /></div>
-            <div><label className="lbl">Date</label><input type="date" value={inwardForm.date} onChange={e => setInwardForm(f => ({ ...f, date: e.target.value }))} /></div>
-            <div>
-              <label className="lbl">BF</label>
-              <select value={inwardForm.bf} onChange={e => setInwardForm(f => ({ ...f, bf: e.target.value }))}>
-                <option value="">Select BF</option>
-                {LINER_BF_OPTS.map(o => <option key={o} value={o}>{o} BF</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="lbl">GSM</label>
-              <select value={inwardForm.gsm} onChange={e => setInwardForm(f => ({ ...f, gsm: e.target.value }))}>
-                <option value="">Select GSM</option>
-                {LINER_GSM_OPTS.map(o => <option key={o} value={o}>{o} GSM</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="lbl">Size (inches)</label>
-              <select value={inwardForm.size} onChange={e => setInwardForm(f => ({ ...f, size: e.target.value }))}>
-                <option value="">Select Size</option>
-                {LINER_SIZE_OPTS.map(o => <option key={o} value={o}>{o}"</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Liners added */}
-        <div className="card">
-          <h3 style={{ marginBottom: inwardLiners.length ? 14 : 0 }}>
-            Liners Added {inwardLiners.length > 0 && `— ${inwardLiners.length} rolls, ${fmt(totalInwardWt)} kg`}
-          </h3>
-          {inwardLiners.length === 0
-            ? <div style={{ fontSize: 13, color: "#b0a898", fontStyle: "italic" }}>No liners yet — enter weights below.</div>
-            : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {inwardLiners.map((lw, i) => (
-                  <div key={lw.id} style={{ background: "#f8f7f4", border: "1px solid #e8e2d8", borderRadius: 8, padding: "7px 10px", display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 10, color: "#b0a898" }}>#{i + 1}</span>
-                    <input type="number" value={lw.weight} onChange={e => setInwardLiners(p => p.map(x => x.id === lw.id ? { ...x, weight: e.target.value } : x))} style={{ width: 72, padding: "4px 8px", fontSize: 12 }} />
-                    <span style={{ fontSize: 10, color: "#b0a898" }}>kg</span>
-                    <button onClick={() => setInwardLiners(p => p.filter(x => x.id !== lw.id))} style={{ background: "transparent", color: "#b83020", border: "1px solid #f0c0ba", borderRadius: 4, padding: "2px 6px", fontSize: 10 }}>✕</button>
-                  </div>
-                ))}
-              </div>
-          }
-        </div>
-
-        {/* Cost rate */}
-        {inwardLiners.length > 0 && (
-          <div className="card">
-            <h3>Buying Cost Rate (₹/kg)</h3>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: inwardRates.mode === "slabs" ? 8 : 0 }}>
-              {inwardRates.mode === "simple" && (
-                <input type="number" step="0.01" inputMode="numeric" value={inwardRates.rate} placeholder="₹/kg e.g. 35"
-                  onChange={e => setInwardRates(p => ({ ...p, rate: e.target.value }))} style={{ flex: 1 }} />
-              )}
-              <button className="btn btn-outline btn-sm" style={{ flexShrink: 0 }}
-                onClick={() => setInwardRates(p => ({ ...p, mode: p.mode === "simple" ? "slabs" : "simple" }))}>
-                {inwardRates.mode === "simple" ? "+ Split rates" : "Simple rate"}
-              </button>
-            </div>
-            {inwardRates.mode === "slabs" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                {inwardRates.slabs.map((sl, si) => (
-                  <div key={si} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <input type="number" inputMode="numeric" value={sl.kg} placeholder="kg" style={{ flex: 1 }}
-                      onChange={e => setInwardRates(p => { const slabs = [...p.slabs]; slabs[si] = { ...slabs[si], kg: e.target.value }; return { ...p, slabs }; })} />
-                    <span style={{ fontSize: 12, color: "#8b6914" }}>kg @</span>
-                    <input type="number" step="0.01" inputMode="numeric" value={sl.rate} placeholder="₹/kg" style={{ flex: 1 }}
-                      onChange={e => setInwardRates(p => { const slabs = [...p.slabs]; slabs[si] = { ...slabs[si], rate: e.target.value }; return { ...p, slabs }; })} />
-                    {inwardRates.slabs.length > 1 && <button onClick={() => setInwardRates(p => ({ ...p, slabs: p.slabs.filter((_,i) => i !== si) }))} style={{ background: "transparent", color: "#b83020", border: "none", fontSize: 14, cursor: "pointer" }}>✕</button>}
-                  </div>
-                ))}
-                <button className="btn btn-outline btn-sm" style={{ alignSelf: "flex-start" }}
-                  onClick={() => setInwardRates(p => ({ ...p, slabs: [...p.slabs, { kg: "", rate: "" }] }))}>+ Add slab</button>
-                <div style={{ fontSize: 11, color: "#9a9080", fontStyle: "italic" }}>Remaining kg assigned to last slab rate</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Sticky entry bar */}
-        <div style={{ position: "sticky", bottom: 0, zIndex: 120, background: "#f8f7f4", padding: "10px 0 0 0" }}>
-          <div className="card" style={{ borderTop: "2px solid #e8e2d8", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 10 }}>
-              <div style={{ flex: 1 }}>
-                <label className="lbl">Weight (kg)</label>
-                <input ref={inwardWeightRef} type="number" inputMode="numeric" value={inwardNewWeight}
-                  onChange={e => setInwardNewWeight(e.target.value)} placeholder="e.g. 85"
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addInwardLiner(); } }} />
-              </div>
-              <button className="btn btn-outline" onMouseDown={e => e.preventDefault()} onClick={addInwardLiner}>+ Add</button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid #e8eef8" }}>
-              <div style={{ fontSize: 13, color: "#8a8070" }}>
-                Total: <span className="serif" style={{ fontSize: 20, color: "#1a1a1a" }}>{fmt(totalInwardWt)} kg</span>
-                <span style={{ fontSize: 11, color: "#b0a898", marginLeft: 6 }}>({inwardLiners.length} liners)</span>
-              </div>
-              <button className="btn btn-dark" onClick={submitInward}
-                disabled={inwardLiners.length === 0 || !inwardForm.supplier || !inwardForm.bf || !inwardForm.gsm || !inwardForm.size}>
-                ✓ Save
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // ── CONVERT VIEW ──
   if (view === "convert") {
@@ -1955,8 +1726,17 @@ function LinerStockTab({ state, update }) {
                           ))}
                         </div>
                         <button onClick={() => addLinerRow(r.id)} style={{ fontSize: 11, background: "transparent", border: "1px solid #e5dece", borderRadius: 5, padding: "3px 8px", cursor: "pointer", color: "#8b6914" }}>+ liner</button>
+                        {/* Total liner weight for this reel — always visible when selected */}
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 600 }}>
+                            Output: <span style={{ color: reelLinerWt > 0 ? "#1a1a1a" : "#b0a898" }}>{reelLinerWt > 0 ? `${fmt(reelLinerWt)} kg` : "—"}</span>
+                          </span>
+                          {reelLinerWt > 0 && <span style={{ fontSize: 10, color: diff >= 0 ? "#2d6a4f" : "#b83020", fontWeight: 600 }}>
+                            {diff >= 0 ? `${fmt(diff.toFixed(1))} waste` : `⚠ over ${fmt(Math.abs(diff).toFixed(1))}`}
+                          </span>}
+                        </div>
                         {conversionForm.labourRate > 0 && reelLinerWt > 0 && (
-                          <div style={{ fontSize: 10, color: "#2d6a4f", marginTop: 6, fontWeight: 600 }}>
+                          <div style={{ fontSize: 10, color: "#2d6a4f", marginTop: 4, fontWeight: 600 }}>
                             Labour: {fmtRs(Number(conversionForm.labourRate) * reelLinerWt)}
                           </div>
                         )}
@@ -1980,10 +1760,14 @@ function LinerStockTab({ state, update }) {
           <div className="card" style={{ borderTop: "2px solid #e8e2d8", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 13, color: "#6a6050" }}>
-                <strong>{selectedReelIds.length}</strong> reels selected · <strong>{totalLinersAcrossAll}</strong> liner entries
+                <strong>{selectedReelIds.length}</strong> reels · <strong>{totalLinersAcrossAll}</strong> liners
+                {(() => {
+                  const totalOutputKg = Object.values(convReelWeights).flat().filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
+                  return totalOutputKg > 0 ? <span style={{ fontWeight: 600, color: "#1a1a1a", marginLeft: 6 }}>· {fmt(totalOutputKg)} kg output</span> : null;
+                })()}
                 {conversionForm.labourRate > 0 && totalLinersAcrossAll > 0 && (() => {
                   const totalOutputKg = Object.values(convReelWeights).flat().filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
-                  return <span style={{ color: "#2d6a4f", fontWeight: 600, marginLeft: 8 }}>Labour: {fmtRs(Number(conversionForm.labourRate) * totalOutputKg)}</span>;
+                  return <span style={{ color: "#2d6a4f", fontWeight: 600, marginLeft: 6 }}>· Labour: {fmtRs(Number(conversionForm.labourRate) * totalOutputKg)}</span>;
                 })()}
               </div>
               <button className="btn btn-dark" onClick={saveConversion} disabled={selectedReelIds.length === 0 || totalLinersAcrossAll === 0}>
@@ -2051,9 +1835,8 @@ function LinerStockTab({ state, update }) {
       {convSaved && <div className="ok-box">✓ Conversion saved! Liners added to stock.</div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>
-          <button className="btn btn-outline" onClick={() => { setView("addInward"); setInwardSaved(false); setInwardLiners([]); }}>+ Liner Inward</button>
           {availableReels.length > 0 && (
             <button className="btn btn-dark" onClick={() => setView("convert")}>🔄 Convert Reels</button>
           )}
@@ -2066,9 +1849,7 @@ function LinerStockTab({ state, update }) {
           <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
           <div className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No liner stock yet.</div>
           <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>
-            {availableReels.length > 0
-              ? <span>Convert reels or use <strong>+ Liner Inward</strong> to add purchased liners.</span>
-              : <span>Use <strong>+ Liner Inward</strong> to add purchased liners, or add reels first to convert them.</span>}
+            {availableReels.length > 0 ? <button className="btn btn-dark btn-sm" onClick={() => setView("convert")}>Convert reels to get started</button> : "Add reels first, then convert them."}
           </div>
         </div>
       ) : (
@@ -2078,8 +1859,6 @@ function LinerStockTab({ state, update }) {
           </div>
           {Object.values(linerGroups).sort((a, b) => Number(a.size) - Number(b.size)).map(grp => {
             const totalWt = grp.liners.reduce((s, r) => s + Number(r.weight), 0);
-            const purchasedCount = grp.liners.filter(r => r.source === "purchased").length;
-            const convertedCount = grp.liners.filter(r => r.source !== "purchased").length;
             return (
               <div key={`${grp.bf}|${grp.gsm}|${grp.size}`} className="card">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -2087,8 +1866,6 @@ function LinerStockTab({ state, update }) {
                     <span className="serif" style={{ fontSize: 22 }}>{grp.size}"</span>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{grp.bf} BF · {grp.gsm} GSM</span>
                     <span className="tag tag-green">{grp.liners.length} liner{grp.liners.length !== 1 ? "s" : ""}</span>
-                    {purchasedCount > 0 && <span className="tag tag-blue" style={{ fontSize: 10 }}>{purchasedCount} bought</span>}
-                    {convertedCount > 0 && <span className="tag" style={{ fontSize: 10 }}>{convertedCount} converted</span>}
                   </div>
                   <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 600 }}>{fmt(totalWt)} kg</span>
                 </div>
@@ -2819,29 +2596,36 @@ function HistoryTab({ state, update }) {
               <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 {/* Challan header */}
                 <div onClick={() => !isEditing && setOpenChallan(prev => prev === key ? null : key)}
-                  style={{ padding: "12px 16px", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
+                  style={{ padding: "10px 14px", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
                   onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#faf8f4"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
+                  {/* Challan No block — leftmost, always visible */}
+                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#1a1a1a" : "#e8e2d8", borderRadius: 7, padding: "5px 9px", minWidth: 44, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: ch.challanNo ? "#b0a898" : "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>Ch</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: ch.challanNo ? "#fff" : "#b0a898", lineHeight: 1.2, fontFamily: "'DM Sans', sans-serif" }}>{ch.challanNo || "—"}</div>
+                  </div>
+                  {/* Main info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Line 1: customer name + reels/liner badge */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1a", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                         {ch.customer || "—"}
                       </span>
-                      {ch.reels.some(r => r.productType === "liner") && <span className="tag" style={{ fontSize: 10, background: "#edf5ff", border: "1px solid #b0ccee", color: "#2a5a8a", flexShrink: 0 }}>📄 Liner</span>}
-                      <span className="tag tag-red" style={{ fontSize: 11, flexShrink: 0 }}>{ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</span>
+                      {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a", flexShrink: 0 }}>Liner</span>}
                     </div>
-                    {/* Line 2: date · challan no · kg · value · size tags */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11, color: "#9a9080", fontWeight: 500 }}>{fmtDate(ch.date)}</span>
-                      {ch.challanNo && <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#9a9080" }}>Ch {ch.challanNo}</span></>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(ch.date)}</span>
                       <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
-                      <span style={{ fontSize: 11, color: "#6a6050", fontWeight: 500 }}>{fmt(Math.round(totalWt))} kg</span>
-                      {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span></> : <span style={{ fontSize: 10, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 4, padding: "1px 6px", color: "#a05800", fontWeight: 600 }}>⚠ no rate</span>; })()}
-                      {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 4).map(sz => (
-                        <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}"</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg</span>
+                      <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
+                      <span style={{ fontSize: 11, color: "#b0a898" }}>{ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</span>
+                      {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span></> : <span style={{ fontSize: 10, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 5px", color: "#a05800", fontWeight: 600 }}>⚠ no rate</span>; })()}
+                    </div>
+                    {/* Size tags — second line only if there's room */}
+                    <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+                      {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 5).map(sz => (
+                        <span key={sz} style={{ fontSize: 10, background: "#f5f0e8", border: "1px solid #e5dece", borderRadius: 3, padding: "1px 5px", color: "#6a6050", fontWeight: 500 }}>{sz}"</span>
                       ))}
-                      {Object.keys(bySizeInChallan).length > 4 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 4}</span>}
+                      {Object.keys(bySizeInChallan).length > 5 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 5}</span>}
                     </div>
                   </div>
                   <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
@@ -3332,10 +3116,9 @@ function ReelReport({ state, soldData }) {
       {/* Top customers */}
       {top5Cust.length > 0 && (
         <div className="card">
-          <h3>Top 5 Customers</h3>
+          <h3>Top Customers</h3>
           {top5Cust.map(([name, data], idx) => {
             const barW = top5Cust[0] ? (data.kg / top5Cust[0][1].kg) * 100 : 0;
-            const topSz = Object.entries(data.sizes).sort((a, b) => b[1] - a[1])[0];
             return (
               <div key={name} style={{ padding: "14px 0", borderBottom: idx < top5Cust.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
@@ -3343,22 +3126,16 @@ function ReelReport({ state, soldData }) {
                     <div style={{ width: 26, height: 26, background: CHART_COLORS[idx], borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700 }}>{idx+1}</div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
-                      <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{data.reels} reels · {fmt(Math.round(data.kg))} kg{topSz ? ` · Top: ${topSz[0]}" (${topSz[1]}×)` : ""}</div>
+                      <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{data.reels} reels · {fmt(Math.round(data.kg))} kg</div>
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    {data.revenue > 0 && <div style={{ fontSize: 13, fontWeight: 700 }}>{fmtRs(data.revenue)}</div>}
+                    {data.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 700 }}>{fmtRs(data.revenue)}</div>}
                     {data.profit !== 0 && data.revenue > 0 && <div style={{ fontSize: 11, color: data.profit >= 0 ? "#2d6a4f" : "#b83020" }}>{fmtRs(data.profit)} profit</div>}
-                    {!data.revenue && <div style={{ fontSize: 11, color: "#b0a898", fontStyle: "italic" }}>no rate set</div>}
                   </div>
                 </div>
                 <div style={{ background: "#e8eef8", borderRadius: 3, height: 3, overflow: "hidden" }}>
                   <div style={{ width: `${barW}%`, height: "100%", background: CHART_COLORS[idx], borderRadius: 3 }} />
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
-                  {Object.entries(data.sizes).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([sz, cnt]) => (
-                    <span key={sz} className="tag" style={{ fontSize: 10 }}>{sz}" × {cnt}</span>
-                  ))}
                 </div>
               </div>
             );
