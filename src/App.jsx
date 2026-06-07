@@ -3475,6 +3475,11 @@ function ReelReport({ state, soldData }) {
   const topSize = topSizes[0];
 
   if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No reel sales yet.</span></div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <PeriodBar />
+      {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
         {[
           { label: "Reels Sold", val: periodSold.length, unit: "reels" },
