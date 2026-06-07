@@ -1856,6 +1856,12 @@ function LinerStockTab({ state, update }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ fontSize: 13, color: "#6a6050", fontWeight: 500 }}>
             {availableLiners.length} liners available · {fmt(availableLiners.reduce((s, r) => s + Number(r.weight), 0))} kg
+            {(() => {
+              const allLiners = state.stock.filter(r => r.productType === "liner");
+              const allKg = allLiners.reduce((s, r) => s + Number(r.weight), 0);
+              const soldLiners = allLiners.filter(r => r.sold);
+              return soldLiners.length > 0 ? <span style={{ color: "#b0a898", marginLeft: 8 }}>· {allLiners.length} total · {fmt(allKg)} kg combined</span> : null;
+            })()}
           </div>
           {Object.values(linerGroups).sort((a, b) => Number(a.size) - Number(b.size)).map(grp => {
             const totalWt = grp.liners.reduce((s, r) => s + Number(r.weight), 0);
@@ -1874,16 +1880,30 @@ function LinerStockTab({ state, update }) {
                     <EditableLinerWeight key={r.id} liner={r} idx={idx} update={update} />
                   ))}
                 </div>
+                {/* Total weight below liner chips */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#9a9080" }}>{grp.liners.length} liner{grp.liners.length !== 1 ? "s" : ""}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(totalWt)} kg total</span>
+                </div>
               </div>
             );
           })}
+          {/* Collective total of all liner groups */}
+          {(() => {
+            const allGrpLiners = Object.values(linerGroups).flatMap(g => g.liners);
+            const totalAllKg = allGrpLiners.reduce((s, r) => s + Number(r.weight), 0);
+            return allGrpLiners.length > 1 ? (
+              <div style={{ padding: "12px 18px", background: "#1a1a1a", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#9a9080" }}>{allGrpLiners.length} liners across all grades</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>{fmt(totalAllKg)} kg total output</span>
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
     </div>
   );
-}
-
-// ─── EDITABLE LINER WEIGHT CHIP ───────────────────────────────────────────────
+} ───────────────────────────────────────────────
 function EditableLinerWeight({ liner, idx, update }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(liner.weight));
@@ -2582,6 +2602,15 @@ function HistoryTab({ state, update }) {
         </div>
       ) : (
         <div className="card-flat">
+          {/* Column header row */}
+          <div style={{ display: "flex", alignItems: "center", background: "#f5f0e8", borderBottom: "1px solid #e8e2d8" }}>
+            <div style={{ width: 56, flexShrink: 0, padding: "6px 4px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>Ch#</div>
+            <div style={{ flex: "0 0 auto", width: "clamp(100px, 28%, 200px)", padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", borderLeft: "1px solid #e8e2d8" }}>Customer</div>
+            <div style={{ flex: "0 0 auto", width: 80, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "right", borderLeft: "1px solid #e8e2d8" }}>Weight</div>
+            <div style={{ flex: "1 1 80px", minWidth: 0, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", borderLeft: "1px solid #e8e2d8" }}>Date</div>
+            <div style={{ flex: "0 0 auto", width: 80, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "right", borderLeft: "1px solid #e8e2d8" }}>Value</div>
+            <div style={{ width: 28, flexShrink: 0 }} />
+          </div>
           {challans.map((ch, idx) => {
             const key = ch.challanNo || `__${ch.date}__${ch.customer}`;
             const isOpen = openChallan === key;
@@ -2596,39 +2625,37 @@ function HistoryTab({ state, update }) {
               <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #e8eef8" : "none" }}>
                 {/* Challan header */}
                 <div onClick={() => !isEditing && setOpenChallan(prev => prev === key ? null : key)}
-                  style={{ padding: "10px 14px", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
+                  style={{ padding: "0", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "stretch", transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
                   onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#faf8f4"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
-                  {/* Challan No block — leftmost, always visible */}
-                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#1a1a1a" : "#e8e2d8", borderRadius: 7, padding: "5px 9px", minWidth: 44, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: ch.challanNo ? "#b0a898" : "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>Ch</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: ch.challanNo ? "#fff" : "#b0a898", lineHeight: 1.2, fontFamily: "'DM Sans', sans-serif" }}>{ch.challanNo || "—"}</div>
+                  {/* Challan No block — leftmost colour column */}
+                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#1a1a1a" : "#e8e2d8", borderRadius: "0", width: 56, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
+                    <div style={{ fontSize: 8, color: ch.challanNo ? "#7a7060" : "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>CH</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: ch.challanNo ? "#fff" : "#b0a898", lineHeight: 1.1, fontFamily: "'DM Sans', sans-serif", textAlign: "center", wordBreak: "break-all" }}>{ch.challanNo || "—"}</div>
                   </div>
-                  {/* Main info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                      <span style={{ fontWeight: 600, fontSize: 13, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-                        {ch.customer || "—"}
-                      </span>
-                      {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a", flexShrink: 0 }}>Liner</span>}
+                  {/* Customer name column */}
+                  <div style={{ flex: "0 0 auto", width: "clamp(100px, 28%, 200px)", padding: "10px 10px", display: "flex", flexDirection: "column", justifyContent: "center", borderLeft: "1px solid #e8e2d8" }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {ch.customer || "—"}
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(ch.date)}</span>
-                      <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg</span>
-                      <span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span>
-                      <span style={{ fontSize: 11, color: "#b0a898" }}>{ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</span>
-                      {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <><span style={{ fontSize: 10, color: "#d0c8bc" }}>·</span><span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span></> : <span style={{ fontSize: 10, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 5px", color: "#a05800", fontWeight: 600 }}>⚠ no rate</span>; })()}
-                    </div>
-                    {/* Size tags — second line only if there's room */}
-                    <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
-                      {Object.keys(bySizeInChallan).sort((a, b) => Number(a) - Number(b)).slice(0, 5).map(sz => (
-                        <span key={sz} style={{ fontSize: 10, background: "#f5f0e8", border: "1px solid #e5dece", borderRadius: 3, padding: "1px 5px", color: "#6a6050", fontWeight: 500 }}>{sz}"</span>
-                      ))}
-                      {Object.keys(bySizeInChallan).length > 5 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{Object.keys(bySizeInChallan).length - 5}</span>}
-                    </div>
+                    {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a", marginTop: 2, display: "inline-block", width: "fit-content" }}>Liner</span>}
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  {/* Weight column */}
+                  <div style={{ flex: "0 0 auto", width: 80, padding: "10px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", borderLeft: "1px solid #e8e2d8" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))}</div>
+                    <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
+                  </div>
+                  {/* Date column — hidden on very small screens via inline media-like flex */}
+                  <div style={{ flex: "1 1 80px", minWidth: 0, padding: "10px 8px", display: "flex", flexDirection: "column", justifyContent: "center", borderLeft: "1px solid #e8e2d8" }}>
+                    <div style={{ fontSize: 11, color: "#6a6050", whiteSpace: "nowrap" }}>{fmtDate(ch.date)}</div>
+                    <div style={{ fontSize: 10, color: "#b0a898", marginTop: 1 }}>{ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</div>
+                  </div>
+                  {/* Value column */}
+                  <div style={{ flex: "0 0 auto", width: 80, padding: "10px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", borderLeft: "1px solid #e8e2d8" }}>
+                    {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <span style={{ fontSize: 12, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span> : <span style={{ fontSize: 9, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 4px", color: "#a05800", fontWeight: 600, textAlign: "center" }}>no rate</span>; })()}
+                  </div>
+                  {/* Expand arrow */}
+                  <div style={{ flexShrink: 0, width: 28, display: "flex", alignItems: "center", justifyContent: "center", color: "#c8b89a", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
 
                 {/* Expanded content */}
