@@ -36,6 +36,9 @@ const SIZE_OPTIONS = Array.from({ length: 38 }, (_, i) => String(19 + i)); // 19
 const LINER_BF_OPTIONS = ["14", "16", "18", "20", "22", "24", "26", "28", "30", "32"];
 const LINER_GSM_OPTIONS = ["80", "90", "100", "110", "120", "130", "140", "150", "160", "170", "180", "190", "200", "210", "220"];
 
+const PRIORITY_GRADES = [{ bf: "18", gsm: "150" }, { bf: "22", gsm: "180" }];
+const isPriority = (bf, gsm) => PRIORITY_GRADES.some(p => p.bf === bf && p.gsm === gsm);
+
 const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [] };
 
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
@@ -247,8 +250,8 @@ export default function App() {
   const totalKg = available.reduce((s, r) => s + Number(r.weight), 0);
 
   const sizeCountMap = {};
-  // Seed from ALL reel stock first so fully sold-out sizes appear with count=0
-  state.stock.filter(r => r.productType !== "liner").forEach(r => {
+  // Seed from priority-grade reel stock only for low/moderate alerts
+  state.stock.filter(r => r.productType !== "liner" && isPriority(r.bf, r.gsm)).forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}|${r.size}`;
     if (!sizeCountMap[k]) sizeCountMap[k] = { count: 0, bf: r.bf, gsm: r.gsm, shade: r.shade, size: r.size };
   });
@@ -392,8 +395,8 @@ export default function App() {
 function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available }) {
   const sold = state.stock.filter(r => r.sold && r.productType !== "liner");
   const bySpec = {};
-  // Seed all known grade+size combos so sold-out sizes show as 0 (reels only)
-  state.stock.filter(r => r.productType !== "liner").forEach(r => {
+  // Only show priority grades on home screen
+  state.stock.filter(r => r.productType !== "liner" && isPriority(r.bf, r.gsm)).forEach(r => {
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
     if (!bySpec[k]) bySpec[k] = { bf: r.bf, gsm: r.gsm, shade: r.shade, reels: 0, kg: 0, sizes: {} };
     if (bySpec[k].sizes[r.size] === undefined) bySpec[k].sizes[r.size] = 0;
@@ -500,6 +503,74 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
           <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>Go to Stock → Add Inward to get started.</div>
         </div>
       )}
+
+      {/* ── LINER SUMMARY SECTION ── */}
+      {(() => {
+        const availLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
+        if (availLiners.length === 0) return null;
+        const linerBySpec = {};
+        availLiners.forEach(r => {
+          const k = `${r.bf}|${r.gsm}|${r.size}`;
+          if (!linerBySpec[k]) linerBySpec[k] = { bf: r.bf, gsm: r.gsm, size: r.size, count: 0, kg: 0 };
+          linerBySpec[k].count++;
+          linerBySpec[k].kg += Number(r.weight);
+        });
+        const totalLinerKg = availLiners.reduce((s, r) => s + Number(r.weight), 0);
+        // Group by grade
+        const byGrade = {};
+        Object.values(linerBySpec).forEach(x => {
+          const gk = `${x.bf}|${x.gsm}`;
+          if (!byGrade[gk]) byGrade[gk] = { bf: x.bf, gsm: x.gsm, sizes: [], totalKg: 0, totalCount: 0 };
+          byGrade[gk].sizes.push(x);
+          byGrade[gk].totalKg += x.kg;
+          byGrade[gk].totalCount += x.count;
+        });
+        return (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Liner Stock</span>
+              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+            </div>
+            <div className="g3">
+              {[
+                { label: "Available Liners", val: availLiners.length, unit: "in stock" },
+                { label: "Liner Weight", val: (totalLinerKg / 1000).toFixed(2), unit: "metric tons" },
+                { label: "Liner Grades", val: Object.keys(byGrade).length, unit: "specs in stock" },
+              ].map(s => (
+                <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
+                  <div className="lbl">{s.label}</div>
+                  <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
+                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
+                </div>
+              ))}
+            </div>
+            {Object.values(byGrade).sort((a, b) => `${a.bf}${a.gsm}`.localeCompare(`${b.bf}${b.gsm}`)).map(grp => (
+              <div key={`${grp.bf}${grp.gsm}`} className="card">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="serif" style={{ fontSize: 16, fontWeight: 500 }}>{grp.bf} BF · {grp.gsm} GSM</span>
+                    <span className="tag" style={{ background: "#edf7f0", borderColor: "#b5dcc0", color: "#2d6a4f" }}>Liner</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9a9080" }}>{grp.totalCount} liner{grp.totalCount !== 1 ? "s" : ""} · {fmt(Math.round(grp.totalKg))} kg</div>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {grp.sizes.sort((a, b) => Number(a.size) - Number(b.size)).map(x => (
+                    <div key={x.size} onClick={() => setTab("Stock")}
+                      style={{ background: "#f0f8f4", border: "1px solid #b5dcc0", borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s" }}
+                      onMouseEnter={e => e.currentTarget.style.transform = "scale(1.05)"}
+                      onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                      <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: "#2d6a4f" }}>{x.size}"</div>
+                      <div style={{ fontSize: 10, color: "#9a9080", marginTop: 4 }}>{x.count} liner{x.count !== 1 ? "s" : ""}</div>
+                      <div style={{ fontSize: 9, color: "#6a9080", marginTop: 1 }}>{fmt(Math.round(x.kg))} kg</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -1543,6 +1614,10 @@ function LinerStockTab({ state, update }) {
   const [selectedReelIds, setSelectedReelIds] = useState([]);
   const [convFilter, setConvFilter] = useState({ bf: "", gsm: "", size: "" });
   const [convSaved, setConvSaved] = useState(false);
+  // Liner inward form
+  const [linerInwardSaved, setLinerInwardSaved] = useState(false);
+  const [linerInwardForm, setLinerInwardForm] = useState({ supplier: "", date: today(), bf: "18", gsm: "150", size: "36", slabMode: false, simpleRate: "", slabs: [{ id: genId(), kg: "", rate: "" }] });
+  const [linerInwardWeights, setLinerInwardWeights] = useState([{ id: genId(), weight: "" }]);
 
   const availableReels = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
   const availableLiners = state.stock.filter(r => !r.sold && r.productType === "liner");
@@ -1627,6 +1702,123 @@ function LinerStockTab({ state, update }) {
     setView("list");
     setTimeout(() => setConvSaved(false), 2500);
   };
+
+  // ── LINER INWARD VIEW ──
+  if (view === "linerInward") {
+    const totalInwardKg = linerInwardWeights.filter(x => x.weight).reduce((s, x) => s + Number(x.weight), 0);
+    const saveLinerInward = () => {
+      const valid = linerInwardWeights.filter(x => x.weight && !isNaN(x.weight));
+      if (valid.length === 0) return;
+      const totalKg = valid.reduce((s, x) => s + Number(x.weight), 0);
+      const costRate = linerInwardForm.slabMode
+        ? computeWeightedCostRate(linerInwardForm.slabs, totalKg)
+        : Number(linerInwardForm.simpleRate) || 0;
+      const newLiners = valid.map(lw => ({
+        id: genId(), productType: "liner", linerSource: "inward",
+        bf: linerInwardForm.bf, gsm: linerInwardForm.gsm, size: linerInwardForm.size,
+        shade: "golden", weight: lw.weight,
+        supplier: linerInwardForm.supplier, inwardDate: linerInwardForm.date,
+        costRate, sold: false,
+      }));
+      update(s => { s.stock = [...s.stock, ...newLiners]; });
+      setLinerInwardSaved(true);
+      setLinerInwardWeights([{ id: genId(), weight: "" }]);
+      setLinerInwardForm(f => ({ ...f, supplier: "", simpleRate: "", slabs: [{ id: genId(), kg: "", rate: "" }] }));
+      setView("list");
+      setTimeout(() => setLinerInwardSaved(false), 2500);
+    };
+    const lif = linerInwardForm;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
+          <div><div className="section-eyebrow">Liner</div><h2>Add Liner Inward</h2></div>
+        </div>
+        <div className="card">
+          <h3>Liner Details</h3>
+          <div className="g3" style={{ marginBottom: 12 }}>
+            <div><label className="lbl">Supplier</label>
+              <input value={lif.supplier} onChange={e => setLinerInwardForm(f => ({ ...f, supplier: e.target.value }))} placeholder="Supplier / Corrugator name" />
+            </div>
+            <div><label className="lbl">Date</label>
+              <input type="date" value={lif.date} onChange={e => setLinerInwardForm(f => ({ ...f, date: e.target.value }))} />
+            </div>
+            <div><label className="lbl">Size (inches)</label>
+              <select value={lif.size} onChange={e => setLinerInwardForm(f => ({ ...f, size: e.target.value }))}>
+                {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
+              </select>
+            </div>
+            <div><label className="lbl">BF</label>
+              <select value={lif.bf} onChange={e => setLinerInwardForm(f => ({ ...f, bf: e.target.value }))}>
+                {LINER_BF_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div><label className="lbl">GSM</label>
+              <select value={lif.gsm} onChange={e => setLinerInwardForm(f => ({ ...f, gsm: e.target.value }))}>
+                {LINER_GSM_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="sep" />
+          <h3>Buying Cost</h3>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button onClick={() => setLinerInwardForm(f => ({ ...f, slabMode: false }))} className={`btn btn-sm ${!lif.slabMode ? "btn-dark" : "btn-outline"}`}>Simple Rate</button>
+            <button onClick={() => setLinerInwardForm(f => ({ ...f, slabMode: true }))} className={`btn btn-sm ${lif.slabMode ? "btn-dark" : "btn-outline"}`}>Split Rate</button>
+          </div>
+          {!lif.slabMode ? (
+            <div style={{ maxWidth: 200 }}>
+              <label className="lbl">Rate (₹/kg)</label>
+              <input type="number" inputMode="numeric" value={lif.simpleRate} onChange={e => setLinerInwardForm(f => ({ ...f, simpleRate: e.target.value }))} placeholder="e.g. 28" />
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p style={{ fontSize: 12, color: "#9a9080" }}>Enter kg thresholds and rates for split pricing.</p>
+              {lif.slabs.map((slab, si) => (
+                <div key={slab.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: "#8b6914", minWidth: 60 }}>Slab {si + 1}</span>
+                  {si < lif.slabs.length - 1 && <div style={{ maxWidth: 120 }}><input type="number" inputMode="numeric" value={slab.kg} onChange={e => setLinerInwardForm(f => ({ ...f, slabs: f.slabs.map((x, i) => i === si ? { ...x, kg: e.target.value } : x) }))} placeholder="up to kg" /></div>}
+                  {si === lif.slabs.length - 1 && <div style={{ maxWidth: 120 }}><input disabled value="remainder" style={{ color: "#9a9080" }} /></div>}
+                  <div style={{ maxWidth: 120 }}><input type="number" inputMode="numeric" value={slab.rate} onChange={e => setLinerInwardForm(f => ({ ...f, slabs: f.slabs.map((x, i) => i === si ? { ...x, rate: e.target.value } : x) }))} placeholder="₹/kg" /></div>
+                  {lif.slabs.length > 1 && <button onClick={() => setLinerInwardForm(f => ({ ...f, slabs: f.slabs.filter((_, i) => i !== si) }))} style={{ background: "transparent", color: "#b83020", border: "none", cursor: "pointer", fontSize: 16 }}>✕</button>}
+                </div>
+              ))}
+              <button onClick={() => setLinerInwardForm(f => ({ ...f, slabs: [...f.slabs, { id: genId(), kg: "", rate: "" }] }))} className="btn btn-outline btn-sm" style={{ alignSelf: "flex-start" }}>+ Add Slab</button>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <h3>Individual Liner Weights</h3>
+          <p style={{ fontSize: 12, color: "#9a9080", marginBottom: 12 }}>Enter the weight of each liner piece.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {linerInwardWeights.map((lw, li) => (
+              <div key={lw.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "#b0a898", minWidth: 24 }}>#{li + 1}</span>
+                <input type="number" inputMode="numeric" value={lw.weight}
+                  onChange={e => setLinerInwardWeights(p => p.map(x => x.id === lw.id ? { ...x, weight: e.target.value } : x))}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); setLinerInwardWeights(p => [...p, { id: genId(), weight: "" }]); } }}
+                  placeholder="kg" style={{ maxWidth: 120 }} autoFocus={li === linerInwardWeights.length - 1 && li > 0} />
+                <span style={{ fontSize: 11, color: "#9a9080" }}>kg</span>
+                {linerInwardWeights.length > 1 && <button onClick={() => setLinerInwardWeights(p => p.filter(x => x.id !== lw.id))} style={{ background: "transparent", color: "#b83020", border: "none", cursor: "pointer", fontSize: 14 }}>✕</button>}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => setLinerInwardWeights(p => [...p, { id: genId(), weight: "" }])} className="btn btn-outline btn-sm">+ Add Liner</button>
+            {totalInwardKg > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a" }}>{linerInwardWeights.filter(x => x.weight).length} liners · {fmt(Math.round(totalInwardKg))} kg total</span>}
+            {totalInwardKg > 0 && (lif.simpleRate || lif.slabMode) && (() => {
+              const rate = lif.slabMode ? computeWeightedCostRate(lif.slabs, totalInwardKg) : Number(lif.simpleRate) || 0;
+              return rate > 0 ? <span style={{ fontSize: 13, color: "#8b6914", fontWeight: 600 }}>· {fmtRs(rate * totalInwardKg)} cost</span> : null;
+            })()}
+          </div>
+        </div>
+
+        <button className="btn btn-dark" onClick={saveLinerInward} disabled={linerInwardWeights.filter(x => x.weight).length === 0} style={{ alignSelf: "flex-start" }}>
+          ✓ Save {linerInwardWeights.filter(x => x.weight).length} Liner{linerInwardWeights.filter(x => x.weight).length !== 1 ? "s" : ""} to Stock
+        </button>
+      </div>
+    );
+  }
 
   // ── CONVERT VIEW ──
   if (view === "convert") {
@@ -1833,10 +2025,12 @@ function LinerStockTab({ state, update }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       {convSaved && <div className="ok-box">✓ Conversion saved! Liners added to stock.</div>}
+      {linerInwardSaved && <div className="ok-box">✓ Liner inward saved! Added to stock.</div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>
+          <button className="btn btn-outline" onClick={() => setView("linerInward")}>+ Add Liner Inward</button>
           {availableReels.length > 0 && (
             <button className="btn btn-dark" onClick={() => setView("convert")}>🔄 Convert Reels</button>
           )}
@@ -1849,7 +2043,7 @@ function LinerStockTab({ state, update }) {
           <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
           <div className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No liner stock yet.</div>
           <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>
-            {availableReels.length > 0 ? <button className="btn btn-dark btn-sm" onClick={() => setView("convert")}>Convert reels to get started</button> : "Add reels first, then convert them."}
+            {availableReels.length > 0 ? <><button className="btn btn-dark btn-sm" onClick={() => setView("convert")} style={{ marginRight: 8 }}>Convert reels</button><button className="btn btn-outline btn-sm" onClick={() => setView("linerInward")}>Add Liner Inward</button></> : <button className="btn btn-outline btn-sm" onClick={() => setView("linerInward")}>Add Liner Inward</button>}
           </div>
         </div>
       ) : (
@@ -1872,6 +2066,8 @@ function LinerStockTab({ state, update }) {
                     <span className="serif" style={{ fontSize: 22 }}>{grp.size}"</span>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{grp.bf} BF · {grp.gsm} GSM</span>
                     <span className="tag tag-green">{grp.liners.length} liner{grp.liners.length !== 1 ? "s" : ""}</span>
+                    {grp.liners.some(r => r.linerSource === "inward") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a" }}>{grp.liners.filter(r => r.linerSource === "inward").length} bought</span>}
+                    {grp.liners.some(r => r.linerSource !== "inward") && <span style={{ fontSize: 9, background: "#f5f0e8", border: "1px solid #e5dece", borderRadius: 3, padding: "1px 5px", color: "#6a6050" }}>{grp.liners.filter(r => r.linerSource !== "inward").length} converted</span>}
                   </div>
                   <span style={{ fontSize: 12, color: "#6a6050", fontWeight: 600 }}>{fmt(totalWt)} kg</span>
                 </div>
@@ -1903,7 +2099,9 @@ function LinerStockTab({ state, update }) {
       )}
     </div>
   );
-} ───────────────────────────────────────────────
+}
+
+// ─── EDITABLE LINER WEIGHT CHIP ───────────────────────────────────────────────
 function EditableLinerWeight({ liner, idx, update }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(liner.weight));
