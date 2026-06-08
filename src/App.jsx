@@ -732,8 +732,8 @@ function SizeInwardHistory({ sz, inwardGroups }) {
                   <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "12px 16px" }}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {grp.reels.map((r, j) => (
-                        <span key={j} style={{ background: r.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "4px 10px", fontSize: 12, color: r.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
-                          {fmt(r.weight)} kg{r.sold ? " · sold" : ""}
+                        <span key={j} style={{ background: r.sold ? "#fef0ee" : r.converted ? "#f8f2ff" : "#edf7f0", border: `1px solid ${r.sold ? "#f0c0ba" : r.converted ? "#c8b0e0" : "#b5dcc0"}`, borderRadius: 5, padding: "4px 10px", fontSize: 12, color: r.sold ? "#9a4030" : r.converted ? "#6a3a8a" : "#2d6a4f", fontWeight: 500 }}>
+                          {fmt(r.weight)} kg{r.sold ? " · sold" : r.converted ? " · → liner" : ""}
                         </span>
                       ))}
                     </div>
@@ -1167,14 +1167,18 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
 
   if (view === "size") {
     const sz = filter.size;
-    // Only show actual reels (not liners, not converted-to-liner reels)
-    const allForSize = state.stock.filter(r => r.size === sz && r.productType !== "liner" && !r.converted);
+    // Include ALL reels for this size (sold, available, converted) so grade keys are always found
+    // This prevents blank/crash when all reels of a new grade have been converted
+    const allForSize = state.stock.filter(r => r.size === sz && r.productType !== "liner");
     // Build separate data per grade so stock/inward/outward are never mixed
     const gradeKeys = [...new Set(allForSize.map(r => `${r.bf}|${r.gsm}|${r.shade}`))].sort();
     const gradeData = gradeKeys.map(gk => {
       const [bf, gsm, shade] = gk.split("|");
       const gradeReels = allForSize.filter(r => r.bf === bf && r.gsm === gsm && r.shade === shade);
+      // Available = not sold AND not converted to liner
       const availForGrade = gradeReels.filter(r => !r.sold && !r.converted);
+      // Converted = sent to liner conversion
+      const convertedForGrade = gradeReels.filter(r => r.converted && !r.sold);
       const soldForGrade = gradeReels.filter(r => r.sold).sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate));
       const inwardGroups = {};
       gradeReels.forEach(r => {
@@ -1189,7 +1193,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
         challanGroups[key].reels.push(r);
       });
       const challanList = Object.values(challanGroups).sort((a, b) => new Date(b.date) - new Date(a.date));
-      return { bf, gsm, shade, availForGrade, inwardGroups, challanList };
+      return { bf, gsm, shade, availForGrade, convertedForGrade, inwardGroups, challanList };
     });
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }} className="fade-in">
@@ -1197,6 +1201,11 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
           <button className="btn btn-outline btn-sm" onClick={() => { setView("list"); setFilter(f => ({ ...f, size: "" })); }}>← Back</button>
           <div><div className="section-eyebrow">Size Detail</div><h2>{sz}" Reels — Full History</h2></div>
         </div>
+        {gradeData.length === 0 && (
+          <div className="card" style={{ textAlign: "center", padding: 40 }}>
+            <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No history found for {sz}" reels.</span>
+          </div>
+        )}
         {gradeData.map((gd, gi) => (
           <div key={`${gd.bf}|${gd.gsm}|${gd.shade}`} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {gradeData.length > 1 && (
@@ -1205,10 +1214,43 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                 <span className="tag" style={{ textTransform: "capitalize" }}>{gd.shade}</span>
                 <span style={{ fontSize: 12, color: "#9a9080", marginLeft: 2 }}>
                   {gd.availForGrade.length} available · {gd.availForGrade.reduce((s, r) => s + Number(r.weight), 0) > 0 ? fmt(gd.availForGrade.reduce((s, r) => s + Number(r.weight), 0)) + " kg" : "0 kg"}
+                  {gd.convertedForGrade.length > 0 && <span style={{ marginLeft: 8, color: "#6a3a8a" }}>· {gd.convertedForGrade.length} converted to liner</span>}
                 </span>
               </div>
             )}
             <EditableStockForSize sz={sz} availForSize={gd.availForGrade} update={update} />
+            {/* Converted-to-liner section */}
+            {gd.convertedForGrade.length > 0 && (
+              <div className="card" style={{ border: "1px solid #c8b0e0" }}>
+                <h3 style={{ color: "#6a3a8a", marginBottom: 12 }}>Converted to Liner — {gd.convertedForGrade.length} reel{gd.convertedForGrade.length !== 1 ? "s" : ""}</h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {gd.convertedForGrade.map(r => {
+                    // Find the liners that came from this reel
+                    const liners = state.stock.filter(l => l.productType === "liner" && l.sourceReelId === r.id);
+                    return (
+                      <div key={r.id} style={{ background: "#f8f2ff", border: "1.5px solid #c8b0e0", borderRadius: 10, padding: "10px 14px", minWidth: 120 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#6a3a8a" }}>{fmt(r.weight)} kg reel</div>
+                        <div style={{ fontSize: 10, color: "#9a8090", marginTop: 2 }}>{fmtDate(r.inwardDate)}</div>
+                        {liners.length > 0 ? (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 10, color: "#6a3a8a", fontWeight: 600, marginBottom: 4 }}>{liners.length} liner{liners.length !== 1 ? "s" : ""} produced:</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {liners.map(l => (
+                                <span key={l.id} style={{ background: l.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${l.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 4, padding: "2px 7px", fontSize: 11, color: l.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
+                                  {fmt(l.weight)} kg{l.sold ? " · sold" : " · avail"}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 10, color: "#b0a898", marginTop: 6, fontStyle: "italic" }}>No liners linked yet</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <SizeInwardHistory sz={sz} inwardGroups={gd.inwardGroups} />
             <SizeOutwardHistory sz={sz} challanList={gd.challanList} />
             {gi < gradeData.length - 1 && <div style={{ height: 1, background: "#e8e2d8", margin: "6px 0" }} />}
@@ -1458,14 +1500,16 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   const availableLiner = state.stock.filter(r => !r.sold && r.productType === "liner");
   const sizeGroupMap = {};
   // Always iterate ALL stock so sizes with 0 available still appear in the list
+  // Exclude liner items and converted-to-liner reels (they are no longer physical reels)
   state.stock.filter(r => r.productType !== "liner").forEach(r => {
     if (filter.bf && r.bf !== filter.bf) return;
     if (filter.gsm && r.gsm !== filter.gsm) return;
     if (filter.shade && r.shade !== filter.shade) return;
     if (filter.size && String(r.size).replace(/"/g,"").trim() !== filter.size) return;
     const k = `${r.size}|${r.bf}|${r.gsm}`;
-    if (!sizeGroupMap[k]) sizeGroupMap[k] = { size: r.size, bf: r.bf, gsm: r.gsm, shade: r.shade, reels: [], soldReels: [] };
+    if (!sizeGroupMap[k]) sizeGroupMap[k] = { size: r.size, bf: r.bf, gsm: r.gsm, shade: r.shade, reels: [], soldReels: [], convertedReels: [] };
     if (r.sold) sizeGroupMap[k].soldReels.push(r);
+    else if (r.converted) sizeGroupMap[k].convertedReels.push(r);
     else sizeGroupMap[k].reels.push(r);
   });
   const sizeGroups = Object.values(sizeGroupMap).sort((a, b) => Number(a.size) - Number(b.size));
@@ -1555,6 +1599,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                       ? <span style={{ fontSize: 11, color: "#b0a898", fontStyle: "italic" }}>No stock</span>
                       : <span style={{ fontSize: 12, fontWeight: 600, color: isCritical ? "#a05800" : "#1a1a1a" }}>{grp.reels.length} reel{grp.reels.length !== 1 ? "s" : ""}</span>
                     }
+                    {grp.convertedReels?.length > 0 && <span style={{ fontSize: 10, background: "#f0eaf8", border: "1px solid #c8b0e0", borderRadius: 4, padding: "1px 6px", color: "#6a3a8a", fontWeight: 600 }}>{grp.convertedReels.length} → liner</span>}
                     {isCritical && <span className="tag tag-orange" style={{ fontSize: 10 }}>Low</span>}
                     {isModerate && <span className="tag tag-blue" style={{ fontSize: 10 }}>3 left</span>}
                     {filter.showSold && grp.soldReels.length > 0 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{grp.soldReels.length} sold</span>}
