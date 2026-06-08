@@ -129,8 +129,10 @@ function BarChart({ data, color = "#2d2d2d", unit = "", height = 120 }) {
 function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corrugater name" }) {
   const [show, setShow] = useState(false);
   const ref = useRef(null);
-  const matches = value.length >= 1
-    ? customers.filter(c => c.toLowerCase().includes(value.toLowerCase()) && c.toLowerCase() !== value.toLowerCase())
+  const normalizedList = [...new Set((customers || []).map(c => c.trim()))].filter(Boolean).sort();
+  const trimmedValue = value.trim().toLowerCase();
+  const matches = trimmedValue.length >= 1
+    ? normalizedList.filter(c => c.toLowerCase().includes(trimmedValue) && c.toLowerCase() !== trimmedValue)
     : [];
 
   useEffect(() => {
@@ -150,7 +152,7 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
       {show && matches.length > 0 && (
         <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #ddd8ce", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", zIndex: 300, maxHeight: 180, overflowY: "auto", marginTop: 3 }}>
           {matches.map(c => (
-            <div key={c} onMouseDown={() => { onChange(c); setShow(false); }}
+            <div key={c} onMouseDown={() => { onChange(c.trim()); setShow(false); }}
               style={{ padding: "9px 14px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #e8eef8" }}
               onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -167,9 +169,12 @@ function CustomerInput({ value, onChange, customers, placeholder = "Buyer / Corr
 function TransporterInput({ value, onChange, transporters, placeholder = "Transporter / Tempo name" }) {
   const [show, setShow] = useState(false);
   const ref = useRef(null);
-  const matches = value.length >= 1
-    ? transporters.filter(c => c.toLowerCase().includes(value.toLowerCase()) && c.toLowerCase() !== value.toLowerCase())
-    : transporters.filter(c => c.toLowerCase() !== value.toLowerCase());
+  // Normalize stored names (trim) to avoid duplicates from trailing spaces
+  const normalizedList = [...new Set((transporters || []).map(c => c.trim()))].filter(Boolean).sort();
+  const trimmedValue = value.trim().toLowerCase();
+  const matches = trimmedValue.length >= 1
+    ? normalizedList.filter(c => c.toLowerCase().includes(trimmedValue) && c.toLowerCase() !== trimmedValue)
+    : normalizedList.filter(c => c.toLowerCase() !== trimmedValue);
   useEffect(() => {
     function handle(e) { if (ref.current && !ref.current.contains(e.target)) setShow(false); }
     document.addEventListener("mousedown", handle);
@@ -181,7 +186,7 @@ function TransporterInput({ value, onChange, transporters, placeholder = "Transp
       {show && matches.length > 0 && (
         <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #ddd8ce", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", zIndex: 300, maxHeight: 160, overflowY: "auto", marginTop: 3 }}>
           {matches.map(c => (
-            <div key={c} onMouseDown={() => { onChange(c); setShow(false); }}
+            <div key={c} onMouseDown={() => { onChange(c.trim()); setShow(false); }}
               style={{ padding: "9px 14px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #e8eef8" }}
               onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -1701,10 +1706,10 @@ function SellTab({ state, update }) {
         if (!selectedGumIds.includes(g.id)) return g;
         return { ...g, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(gumSellRate) || 0, transportBy: transportBy.trim() || undefined };
       });
-      if (customer.trim() && !s.customers.includes(customer.trim())) {
+      if (customer.trim() && !(s.customers||[]).some(x=>x.trim().toLowerCase()===customer.trim().toLowerCase())) {
         s.customers = [...(s.customers || []), customer.trim()].sort();
       }
-      if (transportBy.trim() && !(s.transporters || []).includes(transportBy.trim())) {
+      if (transportBy.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===transportBy.trim().toLowerCase())) {
         s.transporters = [...(s.transporters || []), transportBy.trim()].sort();
       }
       if (!s.customerData) s.customerData = {};
@@ -1959,7 +1964,7 @@ function LinerStockTab({ state, update, isEmployee }) {
     update(s => {
       s.stock = s.stock.map(r => reelIdsToMark.includes(r.id) ? { ...r, converted: true, conversionBatchId: batchId, conversionDate: conversionForm.date } : r);
       s.stock = [...s.stock, ...allNewLiners];
-      if (conversionForm.transportBy.trim() && !(s.transporters || []).includes(conversionForm.transportBy.trim())) {
+      if (conversionForm.transportBy.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===conversionForm.transportBy.trim().toLowerCase())) {
         s.transporters = [...(s.transporters || []), conversionForm.transportBy.trim()].sort();
       }
     });
@@ -2460,7 +2465,7 @@ function LinerSellTab({ state, update }) {
       if (customer.trim() && !(s.linerCustomers || []).includes(customer.trim())) {
         s.linerCustomers = [...(s.linerCustomers || []), customer.trim()].sort();
       }
-      if (transportBy.trim() && !(s.transporters || []).includes(transportBy.trim())) {
+      if (transportBy.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===transportBy.trim().toLowerCase())) {
         s.transporters = [...(s.transporters || []), transportBy.trim()].sort();
       }
     });
@@ -2773,7 +2778,7 @@ function HistoryTab({ state, update }) {
         });
       }
       // Save new customer name if not known
-      if (editForm.customer.trim() && !(s.customers || []).includes(editForm.customer.trim())) {
+      if (editForm.customer.trim() && !(s.customers||[]).some(x=>x.trim().toLowerCase()===editForm.customer.trim().toLowerCase())) {
         s.customers = [...(s.customers || []), editForm.customer.trim()].sort();
       }
     });
@@ -5217,10 +5222,10 @@ function GumSellTab({ state, update }) {
         if (!selected.includes(g.id)) return g;
         return { ...g, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(sellRate) || 0, transportBy: transportBy.trim() || undefined };
       });
-      if (customer.trim() && !(s.customers||[]).includes(customer.trim())) {
+      if (customer.trim() && !(s.customers||[]).some(x=>x.trim().toLowerCase()===customer.trim().toLowerCase())) {
         s.customers = [...(s.customers||[]), customer.trim()].sort();
       }
-      if (transportBy.trim() && !(s.transporters||[]).includes(transportBy.trim())) {
+      if (transportBy.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===transportBy.trim().toLowerCase())) {
         s.transporters = [...(s.transporters||[]), transportBy.trim()].sort();
       }
     });
