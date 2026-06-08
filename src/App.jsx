@@ -2813,21 +2813,31 @@ function HistoryTab({ state, update }) {
   // ── TRANSPORTER LIST VIEW ──
   if (custView === "transporters") {
     const transporterNames = state.transporters || [];
-    // Build trips from all sold stock + conversions
-    const allTrips = [
-      ...state.stock.filter(r => r.sold && r.transportBy).map(r => ({
-        type: "sale", transporter: r.transportBy, date: r.soldDate,
-        challanNo: r.soldChallanNo, customer: r.soldTo, weight: Number(r.weight),
-        id: r.id,
-      })),
-      // Conversion trips (deduplicated by conversionBatchId)
-      ...Object.values(state.stock.filter(r => r.productType === "liner" && r.conversionTransportBy && r.conversionBatchId)
-        .reduce((acc, r) => {
-          if (!acc[r.conversionBatchId]) acc[r.conversionBatchId] = { type: "conversion", transporter: r.conversionTransportBy, date: r.conversionDate, batchId: r.conversionBatchId, corrugator: r.corrugator, weight: 0 };
-          acc[r.conversionBatchId].weight += Number(r.weight);
-          return acc;
-        }, {})),
-    ];
+    // Build raw entries (one per reel for sales, one per batch for conversions)
+    const rawSaleEntries = state.stock.filter(r => r.sold && r.transportBy).map(r => ({
+      type: "sale", transporter: r.transportBy, date: r.soldDate,
+      challanNo: r.soldChallanNo, customer: r.soldTo, weight: Number(r.weight), id: r.id,
+    }));
+    const rawConvEntries = Object.values(state.stock.filter(r => r.productType === "liner" && r.conversionTransportBy && r.conversionBatchId)
+      .reduce((acc, r) => {
+        if (!acc[r.conversionBatchId]) acc[r.conversionBatchId] = { type: "conversion", transporter: r.conversionTransportBy, date: r.conversionDate, batchId: r.conversionBatchId, corrugator: r.corrugator, weight: 0 };
+        acc[r.conversionBatchId].weight += Number(r.weight);
+        return acc;
+      }, {}));
+
+    // Deduplicate sales by challan per transporter, then combine with conversions
+    const deduplicateTrips = (saleEntries, convEntries) => {
+      const challanMap = {};
+      saleEntries.forEach(t => {
+        const k = `${t.transporter}|${t.challanNo || t.date + "|" + t.customer}`;
+        if (!challanMap[k]) challanMap[k] = { ...t, weight: 0 };
+        challanMap[k].weight += t.weight;
+      });
+      return [...Object.values(challanMap), ...convEntries];
+    };
+
+    const allTrips = deduplicateTrips(rawSaleEntries, rawConvEntries);
+
     const tripsByTransporter = {};
     allTrips.forEach(t => {
       if (!tripsByTransporter[t.transporter]) tripsByTransporter[t.transporter] = [];
@@ -2878,23 +2888,32 @@ function HistoryTab({ state, update }) {
 
   // ── TRANSPORTER DETAIL VIEW ──
   if (custView === "transporterDetail" && selTransporter) {
-    const allTrips = [
-      ...state.stock.filter(r => r.sold && r.transportBy === selTransporter).map(r => ({
-        type: "sale", transporter: r.transportBy, date: r.soldDate,
-        challanNo: r.soldChallanNo, customer: r.soldTo, weight: Number(r.weight), id: r.id,
-      })),
-      ...Object.values(state.stock.filter(r => r.productType === "liner" && r.conversionTransportBy === selTransporter && r.conversionBatchId)
-        .reduce((acc, r) => {
-          if (!acc[r.conversionBatchId]) acc[r.conversionBatchId] = { type: "conversion", transporter: r.conversionTransportBy, date: r.conversionDate, batchId: r.conversionBatchId, corrugator: r.corrugator, weight: 0 };
-          acc[r.conversionBatchId].weight += Number(r.weight);
-          return acc;
-        }, {})),
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Build raw entries then deduplicate sales by challan up front
+    const rawSales = state.stock.filter(r => r.sold && r.transportBy === selTransporter).map(r => ({
+      type: "sale", transporter: r.transportBy, date: r.soldDate,
+      challanNo: r.soldChallanNo, customer: r.soldTo, weight: Number(r.weight), id: r.id,
+    }));
+    const rawConversions = Object.values(state.stock.filter(r => r.productType === "liner" && r.conversionTransportBy === selTransporter && r.conversionBatchId)
+      .reduce((acc, r) => {
+        if (!acc[r.conversionBatchId]) acc[r.conversionBatchId] = { type: "conversion", transporter: r.conversionTransportBy, date: r.conversionDate, batchId: r.conversionBatchId, corrugator: r.corrugator, weight: 0 };
+        acc[r.conversionBatchId].weight += Number(r.weight);
+        return acc;
+      }, {}));
+
+    // Deduplicate sales by challan
+    const challanMap = {};
+    rawSales.forEach(t => {
+      const k = t.challanNo || `${t.date}|${t.customer}`;
+      if (!challanMap[k]) challanMap[k] = { ...t, weight: 0 };
+      challanMap[k].weight += t.weight;
+    });
+    const allTrips = [...Object.values(challanMap), ...rawConversions]
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const allMonths = [...new Set(allTrips.map(t => monthKey(t.date)))].sort().reverse();
     const filtered = transporterMonth ? allTrips.filter(t => monthKey(t.date) === transporterMonth) : allTrips;
 
-    // Period counts
+    // Period counts — all from already-deduplicated allTrips
     const now = new Date();
     const todayStr = today();
     const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
@@ -2904,19 +2923,7 @@ function HistoryTab({ state, update }) {
     const tripsMonth = allTrips.filter(t => monthKey(t.date) === monthStr).length;
     const totalKgMonth = allTrips.filter(t => monthKey(t.date) === monthStr).reduce((s, t) => s + (t.weight || 0), 0);
 
-    // Deduplicate trips by challan for sales
-    const challanTrips = {};
-    filtered.forEach(t => {
-      if (t.type === "sale") {
-        const k = t.challanNo || `${t.date}|${t.customer}`;
-        if (!challanTrips[k]) challanTrips[k] = { ...t, weight: 0 };
-        challanTrips[k].weight += t.weight;
-      }
-    });
-    const uniqueTrips = [
-      ...Object.values(challanTrips),
-      ...filtered.filter(t => t.type === "conversion"),
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const uniqueTrips = filtered;
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
