@@ -749,7 +749,7 @@ function SizeInwardHistory({ sz, inwardGroups }) {
 }
 
 // ─── SIZE OUTWARD HISTORY (collapsible challans) ──────────────────────────────
-function SizeOutwardHistory({ sz, challanList }) {
+function SizeOutwardHistory({ sz, challanList, state }) {
   const [open, setOpen] = useState(null);
   const sorted = [...challanList].sort((a, b) => new Date(a.date) - new Date(b.date));
   return (
@@ -1171,10 +1171,10 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
     // This prevents blank/crash when all reels of a new grade have been converted
     const allForSize = state.stock.filter(r => r.size === sz && r.productType !== "liner");
     // Build separate data per grade so stock/inward/outward are never mixed
-    const gradeKeys = [...new Set(allForSize.map(r => `${r.bf}|${r.gsm}|${r.shade}`))].sort();
+    const gradeKeys = [...new Set(allForSize.map(r => `${r.bf}|${r.gsm}|${r.shade||""}`))].sort();
     const gradeData = gradeKeys.map(gk => {
       const [bf, gsm, shade] = gk.split("|");
-      const gradeReels = allForSize.filter(r => r.bf === bf && r.gsm === gsm && r.shade === shade);
+      const gradeReels = allForSize.filter(r => r.bf === bf && r.gsm === gsm && (r.shade||"") === shade);
       // Available = not sold AND not converted to liner
       const availForGrade = gradeReels.filter(r => !r.sold && !r.converted);
       // Converted = sent to liner conversion
@@ -1252,7 +1252,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
               </div>
             )}
             <SizeInwardHistory sz={sz} inwardGroups={gd.inwardGroups} />
-            <SizeOutwardHistory sz={sz} challanList={gd.challanList} />
+            <SizeOutwardHistory sz={sz} challanList={gd.challanList} state={state} />
             {gi < gradeData.length - 1 && <div style={{ height: 1, background: "#e8e2d8", margin: "6px 0" }} />}
           </div>
         ))}
@@ -1507,7 +1507,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
     if (filter.shade && r.shade !== filter.shade) return;
     if (filter.size && String(r.size).replace(/"/g,"").trim() !== filter.size) return;
     const k = `${r.size}|${r.bf}|${r.gsm}`;
-    if (!sizeGroupMap[k]) sizeGroupMap[k] = { size: r.size, bf: r.bf, gsm: r.gsm, shade: r.shade, reels: [], soldReels: [], convertedReels: [] };
+    if (!sizeGroupMap[k]) sizeGroupMap[k] = { size: r.size, bf: r.bf, gsm: r.gsm, shade: r.shade||"", reels: [], soldReels: [], convertedReels: [] };
     if (r.sold) sizeGroupMap[k].soldReels.push(r);
     else if (r.converted) sizeGroupMap[k].convertedReels.push(r);
     else sizeGroupMap[k].reels.push(r);
