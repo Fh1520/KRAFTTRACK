@@ -39,8 +39,10 @@ const LINER_GSM_OPTIONS = ["80", "90", "100", "110", "120", "130", "140", "150",
 const PRIORITY_GRADES = [{ bf: "18", gsm: "150" }, { bf: "22", gsm: "180" }];
 const isPriority = (bf, gsm) => PRIORITY_GRADES.some(p => p.bf === bf && p.gsm === gsm);
 
-const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [] };
+const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [], gumVariants: [{ id: "gum_a", name: "Variant A", color: "#e8a020" }, { id: "gum_b", name: "Variant B", color: "#6a8a3a" }], gumStock: [] };
 
+// GUM helpers
+const DEFAULT_GUM_SACK_WEIGHT = 25; // kg
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function fmtRate(n) { if (!n && n !== 0) return ""; const v = Number(n); return "₹" + (Number.isInteger(v) ? v.toString() : v.toFixed(2)); }
 function getCurrentRate(customerData, customer, bf, gsm) {
@@ -246,7 +248,7 @@ export default function App() {
             cloudSave(data);
           }
         }
-        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [] });
+        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [], gumVariants: data.gumVariants || INITIAL_STATE.gumVariants, gumStock: data.gumStock || [] });
       }
       setSyncing(false);
     }, (error) => {
@@ -796,6 +798,60 @@ function SizeOutwardHistory({ sz, challanList }) {
           })}
         </div>
       )}
+
+      {/* ── GUM SUMMARY SECTION ── */}
+      {(() => {
+        const variants = state.gumVariants || [];
+        const availGum = (state.gumStock || []).filter(g => !g.sold);
+        if (availGum.length === 0) return null;
+        const totalSacks = availGum.length;
+        const totalGumKg = availGum.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+        const byVariant = {};
+        variants.forEach(v => { byVariant[v.id] = { ...v, sacks: 0, kg: 0 }; });
+        availGum.forEach(g => {
+          if (!byVariant[g.variantId]) byVariant[g.variantId] = { id: g.variantId, name: g.variantName || g.variantId, color: "#8a8070", sacks: 0, kg: 0 };
+          byVariant[g.variantId].sacks++;
+          byVariant[g.variantId].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+        });
+        const variantList = Object.values(byVariant).filter(v => v.sacks > 0);
+        return (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Pasting Gum</span>
+              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+            </div>
+            <div className="g3">
+              {[
+                { label: "Total Sacks", val: totalSacks, unit: "available" },
+                { label: "Total Weight", val: (totalGumKg / 1000).toFixed(2), unit: "metric tons" },
+                { label: "Variants", val: variantList.length, unit: "in stock" },
+              ].map(s => (
+                <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
+                  <div className="lbl">{s.label}</div>
+                  <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
+                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
+                </div>
+              ))}
+            </div>
+            {variantList.map(v => (
+              <div key={v.id} className="card">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: 3, background: v.color || "#8b6914" }} />
+                    <span className="serif" style={{ fontSize: 17, fontWeight: 500 }}>{v.name}</span>
+                    <span className="tag" style={{ background: "#fef5e8", borderColor: "#f0d5a0", color: "#a05800" }}>Pasting Gum</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9a9080" }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
+                </div>
+                <div style={{ fontSize: 12, color: "#6a6050" }}>
+                  Avg sack weight: {v.sacks > 0 ? fmt(Math.round(v.kg / v.sacks)) : "—"} kg/sack
+                </div>
+              </div>
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -803,7 +859,7 @@ function SizeOutwardHistory({ sz, challanList }) {
 // ─── BULK IMPORT ─────────────────────────────────────────────────────────────
 // ─── STOCK (INWARD) ───────────────────────────────────────────────────────────
 function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
-  const [productTab, setProductTab] = useState("reels"); // "reels" | "liner"
+  const [productTab, setProductTab] = useState("reels"); // "reels" | "liner" | "gum"
   const [view, setView] = useState("list");
   const [filter, setFilter] = useState({ bf: "", gsm: "", shade: "", size: "", showSold: false });
   const [openShip, setOpenShip] = useState(null);
@@ -828,6 +884,11 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   const [saved, setSaved] = useState(false);
   const [gradeRates, setGradeRates] = useState({}); // "bf|gsm" -> { mode:"simple"|"slabs", rate:"", slabs:[{kg,rate}] }
   const weightInputRef = useRef(null);
+  // Gum additions to inward
+  const [inwardGumRows, setInwardGumRows] = useState([]); // [{id, variantId, numSacks, sackWeight, costRate}]
+  const addGumRow = () => setInwardGumRows(p => [...p, { id: genId(), variantId: (state.gumVariants||[])[0]?.id || "", numSacks: "", sackWeight: "", costRate: "" }]);
+  const removeGumRow = id => setInwardGumRows(p => p.filter(x => x.id !== id));
+  const updateGumRow = (id, field, val) => setInwardGumRows(p => p.map(x => x.id === id ? {...x, [field]: val} : x));
 
   // Detect grades in current reels and ensure gradeRates has an entry for each
   const detectedGrades = [...new Set(reels.map(r => `${form.bf}|${form.gsm}`))];
@@ -849,7 +910,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   };
 
   const submit = () => {
-    if (!form.supplier || reels.length === 0) return;
+    if (!form.supplier || (reels.length === 0 && inwardGumRows.filter(g => g.numSacks && g.sackWeight).length === 0)) return;
     // Group reels by grade to assign costRate
     const gradeGroups = {};
     reels.forEach(r => {
@@ -866,8 +927,24 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
         : 0;
       return { ...r, id: genId(), sold: false, supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date, costRate };
     });
-    update(s => { s.stock = [...s.stock, ...nr]; });
-    setSaved(true); setReels([]); setGradeRates({});
+    // Save gum sacks
+    const validGumRows = inwardGumRows.filter(g => g.variantId && g.numSacks && g.sackWeight);
+    const newGumSacks = validGumRows.flatMap(row => {
+      const variant = (state.gumVariants||[]).find(v => v.id === row.variantId);
+      const batchId = genId();
+      return Array.from({ length: Number(row.numSacks) }, () => ({
+        id: genId(), variantId: row.variantId, variantName: variant?.name || row.variantId,
+        sackWeight: Number(row.sackWeight), costRate: Number(row.costRate) || 0,
+        supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date,
+        sold: false, batchId,
+      }));
+    });
+    update(s => {
+      s.stock = [...s.stock, ...nr];
+      if (!s.gumStock) s.gumStock = [];
+      s.gumStock = [...s.gumStock, ...newGumSacks];
+    });
+    setSaved(true); setReels([]); setGradeRates({}); setInwardGumRows([]);
     setTimeout(() => { setSaved(false); setView("list"); }, 1800);
   };
 
@@ -980,6 +1057,69 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
         </div>
       )}
 
+      {/* ── GUM SACKS SECTION IN INWARD ── */}
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: inwardGumRows.length ? 14 : 0 }}>
+          <h3 style={{ marginBottom: 0 }}>🪣 Pasting Gum — Add to This Inward <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>(optional)</span></h3>
+          <button className="btn btn-outline btn-sm" onClick={addGumRow}>+ Add Gum</button>
+        </div>
+        {inwardGumRows.length === 0 && (
+          <div style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic", marginTop: 8 }}>No gum in this shipment — tap "+ Add Gum" if gum is coming with this truck.</div>
+        )}
+        {inwardGumRows.map((row, ri) => {
+          const variant = (state.gumVariants||[]).find(v => v.id === row.variantId);
+          const rowKg = Number(row.numSacks||0) * Number(row.sackWeight||0);
+          return (
+            <div key={row.id} style={{ marginTop: 12, padding: "12px 14px", background: "#f5f0e8", borderRadius: 10, border: "1px solid #e5dece" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {variant && <div style={{ width: 10, height: 10, borderRadius: 2, background: variant.color }} />}
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>Gum Row {ri+1}</span>
+                </div>
+                <button onClick={() => removeGumRow(row.id)} style={{ background: "transparent", color: "#b83020", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>✕</button>
+              </div>
+              <div className="g3" style={{ marginBottom: 8 }}>
+                <div>
+                  <label className="lbl">Variant</label>
+                  <select value={row.variantId} onChange={e => updateGumRow(row.id, "variantId", e.target.value)}>
+                    <option value="">Select</option>
+                    {(state.gumVariants||[]).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="lbl">No. of Sacks</label>
+                  <input type="number" inputMode="numeric" value={row.numSacks} onChange={e => updateGumRow(row.id, "numSacks", e.target.value)} placeholder="e.g. 10" />
+                </div>
+                <div>
+                  <label className="lbl">Weight/Sack (kg)</label>
+                  <input type="number" inputMode="numeric" value={row.sackWeight} onChange={e => updateGumRow(row.id, "sackWeight", e.target.value)} placeholder="25 or 30" />
+                </div>
+              </div>
+              <div style={{ maxWidth: 180 }}>
+                <label className="lbl">Cost Rate (₹/kg)</label>
+                <input type="number" step="0.01" inputMode="numeric" value={row.costRate} onChange={e => updateGumRow(row.id, "costRate", e.target.value)} placeholder="₹/kg" />
+              </div>
+              {rowKg > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#6a6050", fontWeight: 600 }}>
+                  {row.numSacks} sacks × {row.sackWeight} kg = {fmt(rowKg)} kg
+                  {row.costRate && <span style={{ color: "#8b6914", marginLeft: 8 }}>· {fmtRs(rowKg * Number(row.costRate))} cost</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {inwardGumRows.length > 0 && (() => {
+          const totalGumKg = inwardGumRows.reduce((s, r) => s + Number(r.numSacks||0) * Number(r.sackWeight||0), 0);
+          const totalGumCost = inwardGumRows.reduce((s, r) => s + Number(r.numSacks||0) * Number(r.sackWeight||0) * (Number(r.costRate)||0), 0);
+          return totalGumKg > 0 ? (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #e5dece", fontSize: 12, color: "#6a6050" }}>
+              Total gum: <strong>{fmt(totalGumKg)} kg</strong> across {inwardGumRows.length} variant{inwardGumRows.length !== 1 ? "s" : ""}
+              {totalGumCost > 0 && <span style={{ color: "#8b6914", fontWeight: 700, marginLeft: 8 }}>· {fmtRs(totalGumCost)} cost value</span>}
+            </div>
+          ) : null;
+        })()}
+      </div>
+
       {/* ── STICKY ENTRY BAR — stays at bottom regardless of scroll ── */}
       <div style={{ position: "sticky", bottom: 0, zIndex: 120, background: "#f8f7f4", padding: "10px 0 0 0" }}>
         <div className="card" style={{ borderTop: "2px solid #e8e2d8", borderRadius: "14px 14px 14px 14px", boxShadow: "0 -4px 20px rgba(0,0,0,0.07)" }}>
@@ -1018,7 +1158,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                 return shipVal > 0 ? <span style={{ display: "block", fontSize: 12, color: "#8b6914", fontWeight: 700, marginTop: 2 }}>{fmtRs(shipVal)} shipment value</span> : null;
               })()}
             </div>
-            <button className="btn btn-dark" onClick={submit} disabled={reels.length === 0 || !form.supplier}>✓ Save</button>
+            <button className="btn btn-dark" onClick={submit} disabled={(reels.length === 0 && inwardGumRows.filter(g => g.numSacks && g.sackWeight).length === 0) || !form.supplier}>✓ Save</button>
           </div>
         </div>
       </div>
@@ -1332,16 +1472,19 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   const totalAvailKg = available.filter(r => (!filter.bf || r.bf === filter.bf) && (!filter.gsm || r.gsm === filter.gsm)).reduce((s, r) => s + Number(r.weight), 0);
   const totalAvailReels = available.filter(r => (!filter.bf || r.bf === filter.bf) && (!filter.gsm || r.gsm === filter.gsm)).length;
 
-  // ── LINER LIST VIEW ──
+  // ── LINER / GUM LIST VIEW ──
   if (productTab === "liner") {
     return <LinerStockTab state={state} update={update} isEmployee={isEmployee} />;
+  }
+  if (productTab === "gum") {
+    return <GumStockTab state={state} update={update} isEmployee={isEmployee} />;
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       {/* Product switcher */}
       <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start" }}>
-        {[["reels","📦 Reels"], ["liner","📄 Liner"]].map(([t, label]) => (
+        {[["reels","📦 Reels"], ["liner","📄 Liner"], ["gum","🪣 Gum"]].map(([t, label]) => (
           <button key={t} onClick={() => setProductTab(t)}
             style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: productTab === t ? "#fff" : "transparent", color: productTab === t ? "#1a1a1a" : "#8b6914", fontWeight: productTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: productTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
             {label}
@@ -1456,6 +1599,8 @@ function SellTab({ state, update }) {
   })();
   const [challanNo, setChallanNo] = useState(suggestedChallan);
   const [selected, setSelected] = useState([]);
+  const [selectedGumIds, setSelectedGumIds] = useState([]);
+  const [gumSellRate, setGumSellRate] = useState("");
   const [filter, setFilter] = useState({ bf: "", gsm: "", size: "" });
   const [done, setDone] = useState(null);
   const [sellRates, setSellRates] = useState({}); // "bf|gsm" -> rate string
@@ -1493,13 +1638,20 @@ function SellTab({ state, update }) {
     ? `No ${filter.size}" reels in stock. Please check the size.` : null;
 
   const sell = () => {
-    if (!customer || selected.length === 0) return;
+    if (!customer || (selected.length === 0 && selectedGumIds.length === 0)) return;
     const wt = totalWt; const ct = selReels.length; const val = totalValue;
+    const gumKg = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+    const gumVal = gumSellRate ? gumKg * Number(gumSellRate) : 0;
     update(s => {
       s.stock = s.stock.map(r => {
         if (!selected.includes(r.id)) return r;
         const soldRate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
         return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined };
+      });
+      if (!s.gumStock) s.gumStock = [];
+      s.gumStock = s.gumStock.map(g => {
+        if (!selectedGumIds.includes(g.id)) return g;
+        return { ...g, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(gumSellRate) || 0, transportBy: transportBy.trim() || undefined };
       });
       if (customer.trim() && !s.customers.includes(customer.trim())) {
         s.customers = [...(s.customers || []), customer.trim()].sort();
@@ -1507,7 +1659,6 @@ function SellTab({ state, update }) {
       if (transportBy.trim() && !(s.transporters || []).includes(transportBy.trim())) {
         s.transporters = [...(s.transporters || []), transportBy.trim()].sort();
       }
-      // Save rate to customerData history if set
       if (!s.customerData) s.customerData = {};
       if (!s.customerData[customer]) s.customerData[customer] = { rateHistory: {} };
       Object.entries(sellRates).forEach(([k, rate]) => {
@@ -1519,15 +1670,19 @@ function SellTab({ state, update }) {
         }
       });
     });
-    setDone({ count: ct, wt, customer, val });
+    setDone({ count: ct, wt, customer, val: val + gumVal, gumCount: selectedGumIds.length, gumKg, gumVal });
   };
 
   if (done) return (
     <div className="card fade-in" style={{ textAlign: "center", padding: 56 }}>
       <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
       <div className="serif" style={{ fontSize: 28 }}>Sale Recorded</div>
-      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} reels · {fmt(done.wt)} kg · {done.val ? fmtRs(done.val) : "no rate set"} → {done.customer}</div>
-      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); }}>Record Another Sale</button>
+      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>
+        {done.count > 0 && <div>{done.count} reels · {fmt(done.wt)} kg</div>}
+        {done.gumCount > 0 && <div style={{ marginTop: 4 }}>{done.gumCount} gum sacks · {fmt(done.gumKg)} kg</div>}
+        <div style={{ marginTop: 4 }}>{done.val ? fmtRs(done.val) : "no rate set"} → {done.customer}</div>
+      </div>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setSelectedGumIds([]); setGumSellRate(""); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); }}>Record Another Sale</button>
     </div>
   );
 
@@ -1535,7 +1690,7 @@ function SellTab({ state, update }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       {/* Product switcher */}
       <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start" }}>
-        {[["reels","📦 Reels"], ["liner","📄 Liner"]].map(([t, label]) => (
+        {[["reels","📦 Reels"], ["liner","📄 Liner"], ["gum","🪣 Gum"]].map(([t, label]) => (
           <button key={t} onClick={() => setProductTab(t)}
             style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: productTab === t ? "#fff" : "transparent", color: productTab === t ? "#1a1a1a" : "#8b6914", fontWeight: productTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: productTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
             {label}
@@ -1543,6 +1698,7 @@ function SellTab({ state, update }) {
         ))}
       </div>
       {productTab === "liner" && <LinerSellTab state={state} update={update} />}
+      {productTab === "gum" && <GumSellTab state={state} update={update} />}
       {productTab === "reels" && <>
       <div><div className="section-eyebrow">Dispatch</div><h2>Record a Sale</h2></div>
       <div className="card">
@@ -1633,16 +1789,30 @@ function SellTab({ state, update }) {
           </div>
         )}
       </div>
-      {selected.length > 0 && (
+      {/* GUM ADD-ON to reel challan */}
+      {customer && (
+        <GumAddonForChallan state={state} selectedGumIds={selectedGumIds} setSelectedGumIds={setSelectedGumIds} gumSellRate={gumSellRate} setGumSellRate={setGumSellRate} />
+      )}
+
+      {(selected.length > 0 || selectedGumIds.length > 0) && (
         <div className="card" style={{ border: "1.5px solid #ddd8ce" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
               <div className="lbl">Selected for Sale</div>
-              <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{selected.length} reels · {fmt(totalWt)} kg</div>
-              {totalValue > 0 && <div style={{ fontSize: 14, color: "#8b6914", fontWeight: 700, marginTop: 4 }}>{fmtRs(totalValue)}</div>}
+              {selected.length > 0 && <div className="serif" style={{ fontSize: 22, lineHeight: 1.1 }}>{selected.length} reels · {fmt(totalWt)} kg{totalValue > 0 ? ` · ${fmtRs(totalValue)}` : ""}</div>}
+              {selectedGumIds.length > 0 && (() => {
+                const gKg = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+                const gVal = gumSellRate ? gKg * Number(gumSellRate) : 0;
+                return <div style={{ fontSize: 14, color: "#6a8a3a", fontWeight: 600, marginTop: 2 }}>{selectedGumIds.length} gum sacks · {fmt(gKg)} kg{gVal > 0 ? ` · ${fmtRs(gVal)}` : ""}</div>;
+              })()}
+              {(() => {
+                const gKg = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+                const grandTotal = totalValue + (gumSellRate ? gKg * Number(gumSellRate) : 0);
+                return grandTotal > 0 && (selected.length > 0 && selectedGumIds.length > 0) ? <div style={{ fontSize: 16, color: "#1a1a1a", fontWeight: 800, marginTop: 4 }}>Grand Total: {fmtRs(grandTotal)}</div> : null;
+              })()}
               {!customer && <div style={{ fontSize: 11, color: "#b83020", marginTop: 6 }}>Enter customer name to confirm.</div>}
             </div>
-            <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer}>✓ Confirm Sale</button>
+            <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer || (selected.length === 0 && selectedGumIds.length === 0)}>✓ Confirm Sale</button>
           </div>
         </div>
       )}
@@ -2371,6 +2541,75 @@ function LinerSellTab({ state, update }) {
   );
 }
 
+// ─── GUM ADDON COMPONENT (for reel challan) ──────────────────────────────────
+function GumAddonForChallan({ state, selectedGumIds, setSelectedGumIds, gumSellRate, setGumSellRate }) {
+  const [expanded, setExpanded] = useState(false);
+  const variants = state.gumVariants || [];
+  const availGum = (state.gumStock || []).filter(g => !g.sold);
+  const selectedSacks = availGum.filter(g => selectedGumIds.includes(g.id));
+  const totalGumKg = selectedSacks.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+
+  if (availGum.length === 0) return null;
+
+  return (
+    <div className="card" style={{ border: selectedGumIds.length > 0 ? "1.5px solid #6a8a3a" : "1px solid #e8e2d8" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpanded(e => !e)}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>🪣 Add Gum Sacks to This Challan <span style={{ fontWeight: 400, color: "#9a9080" }}>(optional)</span></div>
+          {selectedGumIds.length > 0 && <div style={{ fontSize: 12, color: "#6a8a3a", marginTop: 2 }}>{selectedGumIds.length} sacks · {fmt(totalGumKg)} kg selected{gumSellRate ? ` · ${fmtRs(totalGumKg * Number(gumSellRate))}` : ""}</div>}
+        </div>
+        <div style={{ color: "#c8b89a", fontSize: 16, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+      </div>
+      {expanded && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ marginBottom: 12 }}>
+            <label className="lbl">Gum Rate ₹/kg <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(applies to all selected sacks)</span></label>
+            <input type="number" step="0.01" inputMode="numeric" value={gumSellRate} onChange={e => setGumSellRate(e.target.value)} placeholder="e.g. 24" style={{ maxWidth: 150 }} />
+          </div>
+          {variants.map(v => {
+            const vSacks = availGum.filter(g => g.variantId === v.id);
+            if (vSacks.length === 0) return null;
+            return (
+              <div key={v.id} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: v.color }} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{v.name}</span>
+                  <span style={{ fontSize: 11, color: "#9a9080" }}>— {vSacks.length} available</span>
+                  <button className="btn btn-outline btn-sm" style={{ marginLeft: "auto", fontSize: 10, padding: "3px 8px" }}
+                    onClick={e => { e.stopPropagation(); const allIds = vSacks.map(g => g.id); const allSel = allIds.every(id => selectedGumIds.includes(id)); setSelectedGumIds(p => allSel ? p.filter(id => !allIds.includes(id)) : [...new Set([...p, ...allIds])]); }}>
+                    {vSacks.every(g => selectedGumIds.includes(g.id)) ? "Deselect All" : "Select All"}
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {vSacks.map(g => {
+                    const sel = selectedGumIds.includes(g.id);
+                    return (
+                      <div key={g.id} onClick={e => { e.stopPropagation(); setSelectedGumIds(p => sel ? p.filter(id => id !== g.id) : [...p, g.id]); }}
+                        style={{ cursor: "pointer", background: sel ? "#f0f7ea" : "#f8f7f4", border: `2px solid ${sel ? "#6a8a3a" : "#e8e2d8"}`, borderRadius: 8, padding: "6px 10px", textAlign: "center", minWidth: 72, transition: "all 0.1s" }}>
+                        <div style={{ width: 16, height: 16, border: `2px solid ${sel ? "#6a8a3a" : "#ccc"}`, borderRadius: 3, background: sel ? "#6a8a3a" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 3px" }}>
+                          {sel && <span style={{ color: "#fff", fontSize: 9 }}>✓</span>}
+                        </div>
+                        <div style={{ fontSize: 15, fontWeight: 600 }}>{fmt(g.sackWeight)}</div>
+                        <div style={{ fontSize: 9, color: "#9a9080" }}>kg</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {selectedGumIds.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e8e2d8", fontSize: 12, color: "#6a8a3a", fontWeight: 600 }}>
+              {selectedGumIds.length} sacks selected · {fmt(totalGumKg)} kg
+              {gumSellRate && <span style={{ marginLeft: 8 }}>· {fmtRs(totalGumKg * Number(gumSellRate))}</span>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── HISTORY ─────────────────────────────────────────────────────────────────
 function HistoryTab({ state, update }) {
   const [search, setSearch] = useState("");
@@ -2398,26 +2637,55 @@ function HistoryTab({ state, update }) {
   sold.forEach(r => {
     const key = r.soldChallanNo ? r.soldChallanNo : `__${r.soldDate}__${r.soldTo}`;
     if (!challanMap[key]) {
-      challanMap[key] = { challanNo: r.soldChallanNo || null, date: r.soldDate, customer: r.soldTo || "", reels: [] };
+      challanMap[key] = { challanNo: r.soldChallanNo || null, date: r.soldDate, customer: r.soldTo || "", reels: [], gumSacks: [] };
     } else if (!challanMap[key].customer && r.soldTo) {
       challanMap[key].customer = r.soldTo;
     }
     challanMap[key].reels.push(r);
   });
+  // Merge gum sacks into challan map
+  (state.gumStock||[]).filter(g => g.sold).forEach(g => {
+    const key = g.soldChallanNo ? g.soldChallanNo : `__${g.soldDate}__${g.soldTo}`;
+    if (!challanMap[key]) {
+      challanMap[key] = { challanNo: g.soldChallanNo || null, date: g.soldDate, customer: g.soldTo || "", reels: [], gumSacks: [] };
+    }
+    if (!challanMap[key].gumSacks) challanMap[key].gumSacks = [];
+    challanMap[key].gumSacks.push(g);
+    if (!challanMap[key].customer && g.soldTo) challanMap[key].customer = g.soldTo;
+  });
 
   const allChallanCustomers = [...new Set(Object.values(challanMap).map(c => c.customer).filter(Boolean))].sort();
   const allChallanMonths = [...new Set(Object.values(challanMap).map(c => monthKey(c.date)).filter(Boolean))].sort().reverse();
 
-  // Per-customer aggregate stats
+  // Per-customer aggregate stats (includes gum challans)
+  const gumChallanMap = {};
+  (state.gumStock || []).filter(g => g.sold).forEach(g => {
+    const key = g.soldChallanNo ? g.soldChallanNo : `__${g.soldDate}__${g.soldTo}`;
+    if (!gumChallanMap[key]) gumChallanMap[key] = { challanNo: g.soldChallanNo || null, date: g.soldDate, customer: g.soldTo || "", sacks: [] };
+    gumChallanMap[key].sacks.push(g);
+  });
+
   const custStats = {};
   Object.values(challanMap).forEach(ch => {
     const c = ch.customer || "Unknown";
-    if (!custStats[c]) custStats[c] = { reels: 0, kg: 0, challans: 0, lastDate: "", sizes: {} };
+    if (!custStats[c]) custStats[c] = { reels: 0, kg: 0, challans: 0, lastDate: "", sizes: {}, gumSacks: 0, gumKg: 0, gumRevenue: 0 };
     custStats[c].challans++;
     custStats[c].reels += ch.reels.length;
     custStats[c].kg += ch.reels.reduce((s, r) => s + Number(r.weight), 0);
     if (!custStats[c].lastDate || ch.date > custStats[c].lastDate) custStats[c].lastDate = ch.date;
     ch.reels.forEach(r => { custStats[c].sizes[r.size] = (custStats[c].sizes[r.size] || 0) + 1; });
+  });
+  // Merge gum data into customer stats
+  Object.values(gumChallanMap).forEach(ch => {
+    const c = ch.customer || "Unknown";
+    if (!custStats[c]) custStats[c] = { reels: 0, kg: 0, challans: 0, lastDate: "", sizes: {}, gumSacks: 0, gumKg: 0, gumRevenue: 0 };
+    custStats[c].gumSacks += ch.sacks.length;
+    custStats[c].gumKg += ch.sacks.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+    custStats[c].gumRevenue += ch.sacks.reduce((s, g) => s + (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+    if (!custStats[c].lastDate || ch.date > custStats[c].lastDate) custStats[c].lastDate = ch.date;
+    // Count as challan if customer only has gum (no reel challan with same key)
+    const alreadyCounted = Object.values(challanMap).some(rc => rc.customer === c && (rc.challanNo === ch.challanNo || (rc.date === ch.date && !rc.challanNo && !ch.challanNo)));
+    if (!alreadyCounted) custStats[c].challans++;
   });
 
   let challans = Object.values(challanMap).sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -2438,7 +2706,7 @@ function HistoryTab({ state, update }) {
 
   const startEditChallan = (ch, key) => {
     setEditingChallan(key);
-    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "" });
+    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "", transportBy: ch.reels[0]?.transportBy || "" });
     setOpenChallan(key);
   };
 
@@ -2447,8 +2715,15 @@ function HistoryTab({ state, update }) {
     update(s => {
       s.stock = s.stock.map(r => {
         if (!ids.includes(r.id)) return r;
-        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo };
+        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined };
       });
+      // Also update gum sacks on same challan
+      if (s.gumStock) {
+        s.gumStock = s.gumStock.map(g => {
+          if (g.soldChallanNo !== ch.challanNo && !(g.soldDate === ch.date && g.soldTo === ch.customer)) return g;
+          return { ...g, transportBy: editForm.transportBy || undefined };
+        });
+      }
       // Save new customer name if not known
       if (editForm.customer.trim() && !(s.customers || []).includes(editForm.customer.trim())) {
         s.customers = [...(s.customers || []), editForm.customer.trim()].sort();
@@ -2695,7 +2970,7 @@ function HistoryTab({ state, update }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
                     <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>
-                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels · {fmt(Math.round(cs.kg))} kg{topSz ? ` · Top: ${topSz[0]}"` : ""}
+                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels · {fmt(Math.round(cs.kg))} kg{cs.gumSacks > 0 ? ` · ${cs.gumSacks} gum sack${cs.gumSacks !== 1 ? "s" : ""}` : ""}{topSz ? ` · Top: ${topSz[0]}"` : ""}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -2722,9 +2997,14 @@ function HistoryTab({ state, update }) {
     const cs = custStats[selCustomer] || {};
     const cd = state.customerData?.[selCustomer] || {};
     const custChallans = Object.values(challanMap).filter(c => (c.customer || "") === selCustomer);
-    const revenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
-    const profit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
-    return { cs, cd, revenue, profit, custChallans };
+    const reelRevenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
+    const reelProfit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
+    const gumRevenue = cs.gumRevenue || 0;
+    const custGumSold = (state.gumStock||[]).filter(g => g.sold && g.soldTo === selCustomer);
+    const gumProfit = custGumSold.reduce((s, g) => s + ((Number(g.soldRate)||0) - (Number(g.costRate)||0)) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+    const revenue = reelRevenue + gumRevenue;
+    const profit = reelProfit + gumProfit;
+    return { cs, cd, revenue, profit, reelRevenue, reelProfit, gumRevenue, gumProfit, custChallans, custGumSold };
   })() : null;
 
   // Bulk apply: compute preview
@@ -2819,7 +3099,7 @@ function HistoryTab({ state, update }) {
               {[
                 { label: "Challans", val: custLedger.cs.challans || 0 },
                 { label: "Reels", val: custLedger.cs.reels || 0 },
-                { label: "Total kg", val: fmt(Math.round(custLedger.cs.kg || 0)) },
+                { label: "Gum Sacks", val: custLedger.cs.gumSacks || 0 },
                 { label: "Revenue", val: custLedger.revenue ? fmtRs(custLedger.revenue) : "—" },
                 { label: "Profit", val: custLedger.profit ? fmtRs(custLedger.profit) : "—" },
               ].map(s => (
@@ -3050,6 +3330,8 @@ function HistoryTab({ state, update }) {
             const isOpen = openChallan === key;
             const isEditing = editingChallan === key;
             const totalWt = ch.reels.reduce((s, r) => s + Number(r.weight), 0);
+            const gumSacks = ch.gumSacks || [];
+            const totalGumWt = gumSacks.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
             const bySizeInChallan = {};
             ch.reels.forEach(r => {
               if (!bySizeInChallan[r.size]) bySizeInChallan[r.size] = [];
@@ -3078,8 +3360,11 @@ function HistoryTab({ state, update }) {
                   </div>
                   {/* Weight + value — right column */}
                   <div style={{ flexShrink: 0, width: 70, padding: "8px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 3, borderLeft: "1px solid #e8e2d8" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>kg</span></div>
-                    {(() => { const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0); return v > 0 ? <span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span> : <span style={{ fontSize: 9, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 4px", color: "#a05800", fontWeight: 600 }}>no rate</span>; })()}
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(totalWt + totalGumWt))} <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>kg</span></div>
+                    {(() => {
+                      const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0) + gumSacks.reduce((s,g) => s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0);
+                      return v > 0 ? <span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span> : <span style={{ fontSize: 9, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 4px", color: "#a05800", fontWeight: 600 }}>no rate</span>;
+                    })()}
                   </div>
                   {/* Expand arrow */}
                   <div style={{ flexShrink: 0, width: 28, display: "flex", alignItems: "center", justifyContent: "center", color: "#c8b89a", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
@@ -3108,6 +3393,10 @@ function HistoryTab({ state, update }) {
                               <label className="lbl">Challan No</label>
                               <input value={editForm.challanNo} onChange={e => setEditForm(f => ({ ...f, challanNo: e.target.value }))} placeholder="e.g. CH-101" />
                             </div>
+                          </div>
+                          <div style={{ marginBottom: 10 }}>
+                            <label className="lbl">🚚 Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(add / edit)</span></label>
+                            <TransporterInput value={editForm.transportBy || ""} onChange={v => setEditForm(f => ({ ...f, transportBy: v }))} transporters={state.transporters || []} placeholder="Transporter / Tempo name" />
                           </div>
                           <div style={{ display: "flex", gap: 8 }}>
                             <button className="btn btn-dark btn-sm" onClick={() => saveEditChallan(ch, key)}>✓ Save Header</button>
@@ -3254,13 +3543,57 @@ function HistoryTab({ state, update }) {
                               </div>
                             );
                           })}
+                          {/* Gum sacks in this challan */}
+                          {gumSacks.length > 0 && (
+                            <div style={{ marginTop: 12, padding: "10px 12px", background: "#f0f7ea", borderRadius: 10, border: "1px solid #b5d8a0" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: "#2d6a4f" }}>🪣 Pasting Gum — {gumSacks.length} sack{gumSacks.length !== 1 ? "s" : ""} · {fmt(Math.round(totalGumWt))} kg</span>
+                                <div style={{ flex: 1 }} />
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <input
+                                    type="number" inputMode="numeric"
+                                    defaultValue={gumSacks[0]?.soldRate || ""}
+                                    placeholder="₹/kg"
+                                    onBlur={e => {
+                                      const newRate = e.target.value;
+                                      if (!newRate) return;
+                                      update(s => {
+                                        if (!s.gumStock) return;
+                                        s.gumStock = s.gumStock.map(g =>
+                                          gumSacks.some(x => x.id === g.id) ? { ...g, soldRate: Number(newRate) } : g
+                                        );
+                                      });
+                                    }}
+                                    style={{ width: 80, padding: "4px 8px", fontSize: 12 }}
+                                  />
+                                  <span style={{ fontSize: 11, color: "#5a8a5a" }}>/kg</span>
+                                  {gumSacks[0]?.soldRate > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#1a1a1a" }}>{fmtRs(totalGumWt * (gumSacks[0]?.soldRate||0))}</span>}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                                {gumSacks.map((g, gi) => {
+                                  const vName = (state.gumVariants||[]).find(v => v.id === g.variantId)?.name || g.variantName || "Gum";
+                                  const vColor = (state.gumVariants||[]).find(v => v.id === g.variantId)?.color || "#6a8a3a";
+                                  return (
+                                    <span key={g.id} style={{ background: "#fff", border: `1px solid ${vColor}66`, borderRadius: 5, padding: "3px 9px", fontSize: 12, color: "#2d6a4f", fontWeight: 500, display: "flex", alignItems: "center", gap: 5 }}>
+                                      <div style={{ width: 8, height: 8, borderRadius: 2, background: vColor }} />
+                                      {vName} · {fmt(g.sackWeight)} kg
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
                           <div style={{ paddingTop: 10, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, flexWrap: "wrap", gap: 6 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                              <span style={{ color: "#9a9080" }}>{ch.reels.length} reels · {fmt(Math.round(totalWt))} kg</span>
-                              {ch.reels[0]?.transportBy && <span style={{ fontSize: 11, color: "#6a6050" }}>🚚 {ch.reels[0].transportBy}</span>}
+                              <span style={{ color: "#9a9080" }}>{ch.reels.length > 0 ? `${ch.reels.length} reels · ${fmt(Math.round(totalWt))} kg` : ""}{ch.reels.length > 0 && gumSacks.length > 0 ? " · " : ""}{gumSacks.length > 0 ? `${gumSacks.length} gum sacks · ${fmt(Math.round(totalGumWt))} kg` : ""}</span>
+                              {(ch.reels[0]?.transportBy || gumSacks[0]?.transportBy) && <span style={{ fontSize: 11, color: "#6a6050" }}>🚚 {ch.reels[0]?.transportBy || gumSacks[0]?.transportBy}</span>}
                             </div>
                             <span style={{ fontWeight: 700, color: "#1a1a1a", fontSize: 15 }}>
-                              {challanVal > 0 ? fmtRs(challanVal) : <span style={{ color: "#b0a898", fontStyle: "italic", fontSize: 12 }}>Add ₹/kg to see total</span>}
+                              {(challanVal + gumSacks.reduce((s,g) => s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0)) > 0
+                                ? fmtRs(challanVal + gumSacks.reduce((s,g) => s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0))
+                                : <span style={{ color: "#b0a898", fontStyle: "italic", fontSize: 12 }}>Add ₹/kg to see total</span>}
                             </span>
                           </div>
                         </div>
@@ -3382,12 +3715,13 @@ function usePeriod(sold) {
 }
 
 function ReportsTab({ state }) {
-  const [reportTab, setReportTab] = useState("reels"); // "reels" | "liner" | "business"
+  const [reportTab, setReportTab] = useState("reels"); // "reels" | "liner" | "gum" | "business"
   const allSold = state.stock.filter(r => r.sold && r.soldDate);
   const reelSold = allSold.filter(r => r.productType !== "liner");
   const linerSold = allSold.filter(r => r.productType === "liner");
+  const gumSold = (state.gumStock || []).filter(g => g.sold && g.soldDate);
 
-  if (allSold.length === 0) return (
+  if (allSold.length === 0 && gumSold.length === 0) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
       <div className="card" style={{ textAlign: "center", padding: 52 }}>
@@ -3403,7 +3737,7 @@ function ReportsTab({ state }) {
       <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
       {/* Section switcher */}
       <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start", flexWrap: "wrap" }}>
-        {[["reels","📦 Reels"],["liner","📄 Liner"],["business","🏢 Full Business"]].map(([t, label]) => (
+        {[["reels","📦 Reels"],["liner","📄 Liner"],["gum","🪣 Gum"],["business","🏢 Full Business"]].map(([t, label]) => (
           <button key={t} onClick={() => setReportTab(t)}
             style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: reportTab === t ? "#fff" : "transparent", color: reportTab === t ? "#1a1a1a" : "#8b6914", fontWeight: reportTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: reportTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
             {label}
@@ -3412,7 +3746,8 @@ function ReportsTab({ state }) {
       </div>
       {reportTab === "reels" && <ReelReport state={state} soldData={reelSold} />}
       {reportTab === "liner" && <LinerReport state={state} soldData={linerSold} />}
-      {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} allSold={allSold} />}
+      {reportTab === "gum" && <GumReport state={state} soldData={gumSold} />}
+      {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} gumSold={gumSold} allSold={allSold} />}
     </div>
   );
 }
@@ -3839,10 +4174,13 @@ function LinerReport({ state, soldData }) {
 }
 
 // ─── BUSINESS REPORT ─────────────────────────────────────────────────────────
-function BusinessReport({ state, reelSold, linerSold, allSold }) {
+function BusinessReport({ state, reelSold, linerSold, gumSold, allSold }) {
   const { periodSold: periodAll, periodLabel, PeriodBar } = usePeriod(allSold);
   const periodReels = periodAll.filter(r => r.productType !== "liner");
   const periodLiners = periodAll.filter(r => r.productType === "liner");
+
+  // Gum period filter based on same period as allSold
+  const gumSoldFiltered = (gumSold || []);
 
   const calc = arr => ({
     count: arr.length,
@@ -3850,31 +4188,47 @@ function BusinessReport({ state, reelSold, linerSold, allSold }) {
     revenue: arr.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0),
     cost: arr.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0),
   });
+  const calcGum = arr => ({
+    count: arr.length,
+    kg: arr.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
+    revenue: arr.reduce((s, g) => s + (Number(g.soldRate) || 0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
+    cost: arr.reduce((s, g) => s + (Number(g.costRate) || 0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
+  });
   const R = calc(periodReels);
   const L = calc(periodLiners);
-  const T = calc(periodAll);
+  const G = calcGum(gumSoldFiltered);
+  const T = {
+    count: R.count + L.count + G.count,
+    kg: R.kg + L.kg + G.kg,
+    revenue: R.revenue + L.revenue + G.revenue,
+    cost: R.cost + L.cost + G.cost,
+  };
   const reelProfit = R.revenue - R.cost;
   const linerProfit = L.revenue - L.cost;
+  const gumProfit = G.revenue - G.cost;
   const totalProfit = T.revenue - T.cost;
 
   // Monthly combined trend
-  const allMonths = [...new Set(allSold.map(r => monthKey(r.soldDate)))].sort().reverse();
+  const allMonths = [...new Set([...allSold.map(r => monthKey(r.soldDate)), ...(gumSold||[]).map(g => monthKey(g.soldDate))].filter(Boolean))].sort().reverse();
   const last6 = allMonths.slice(0, 6).reverse();
   const trendData = last6.map(m => ({
     label: monthLabel(m).split(" ")[0],
     reels: reelSold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0),
     liner: linerSold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + Number(r.weight), 0),
+    gum: (gumSold||[]).filter(g => monthKey(g.soldDate) === m).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
   }));
 
   // Revenue split pie
   const revSplit = [];
   if (R.revenue > 0) revSplit.push({ label: "Reels", value: R.revenue });
   if (L.revenue > 0) revSplit.push({ label: "Liner", value: L.revenue });
+  if (G.revenue > 0) revSplit.push({ label: "Gum", value: G.revenue });
 
   // Profit split pie
   const profSplit = [];
   if (reelProfit > 0) profSplit.push({ label: "Reels", value: reelProfit });
   if (linerProfit > 0) profSplit.push({ label: "Liner", value: linerProfit });
+  if (gumProfit > 0) profSplit.push({ label: "Gum", value: gumProfit });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -3896,10 +4250,11 @@ function BusinessReport({ state, reelSold, linerSold, allSold }) {
       </div>
 
       {/* Side-by-side product comparison */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
         {[
           { label: "📦 Reels", data: R, profit: reelProfit, color: "#8b6914", bg: "#fdf9f0" },
           { label: "📄 Liner", data: L, profit: linerProfit, color: "#2a5a8a", bg: "#f0f5ff" },
+          { label: "🪣 Gum", data: G, profit: gumProfit, color: "#6a8a3a", bg: "#f0f7ea" },
         ].map(({ label, data, profit, color, bg }) => (
           <div key={label} className="card" style={{ background: bg, border: `1.5px solid ${color}22` }}>
             <div style={{ fontSize: 13, fontWeight: 700, color, marginBottom: 10 }}>{label}</div>
@@ -3954,6 +4309,7 @@ function BusinessReport({ state, reelSold, linerSold, allSold }) {
             <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b6914" }}><div style={{ width: 10, height: 10, background: "#8b6914", borderRadius: 2 }} />Reels</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#3a7a8a" }}><div style={{ width: 10, height: 10, background: "#3a7a8a", borderRadius: 2 }} />Liner</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6a8a3a" }}><div style={{ width: 10, height: 10, background: "#6a8a3a", borderRadius: 2 }} />Gum</span>
             </div>
           </div>
         </div>
@@ -3964,8 +4320,8 @@ function BusinessReport({ state, reelSold, linerSold, allSold }) {
         <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabel}</h3>
         <div className="g3">
           {[
-            { label: "Strongest Product", val: R.revenue >= L.revenue ? "Reels" : "Liner", sub: `${R.revenue >= L.revenue ? fmtRs(R.revenue) : fmtRs(L.revenue)} revenue` },
-            { label: "Best Margin", val: (reelProfit/Math.max(R.revenue,1)) >= (linerProfit/Math.max(L.revenue,1)) ? "Reels" : "Liner", sub: `${Math.max(R.revenue > 0 ? (reelProfit/R.revenue)*100 : 0, L.revenue > 0 ? (linerProfit/L.revenue)*100 : 0).toFixed(1)}% margin` },
+            { label: "Strongest Product", val: R.revenue >= L.revenue && R.revenue >= G.revenue ? "Reels" : L.revenue >= G.revenue ? "Liner" : "Gum", sub: `${fmtRs(Math.max(R.revenue, L.revenue, G.revenue))} revenue` },
+            { label: "Best Margin", val: (() => { const rm = R.revenue > 0 ? reelProfit/R.revenue : -Infinity; const lm = L.revenue > 0 ? linerProfit/L.revenue : -Infinity; const gm = G.revenue > 0 ? gumProfit/G.revenue : -Infinity; return rm >= lm && rm >= gm ? "Reels" : lm >= gm ? "Liner" : "Gum"; })(), sub: `${(Math.max(R.revenue > 0 ? (reelProfit/R.revenue)*100 : -Infinity, L.revenue > 0 ? (linerProfit/L.revenue)*100 : -Infinity, G.revenue > 0 ? (gumProfit/G.revenue)*100 : -Infinity)).toFixed(1)}% margin` },
             { label: "Total Business", val: fmtRs(T.revenue), sub: `${fmtRs(totalProfit)} profit` },
           ].map(x => (
             <div key={x.label}>
@@ -4511,6 +4867,646 @@ function _OldReportsTabBody({ state }) {
   );
 }
 
+
+// ─── GUM STOCK TAB ──────────────────────────────────────────────────────────
+function GumStockTab({ state, update, isEmployee }) {
+  const [view, setView] = useState("list"); // "list" | "inward" | "history"
+  const [saved, setSaved] = useState(false);
+  const [form, setForm] = useState({ supplier: "", invoiceNo: "", date: "", variantId: "", sackWeight: "", numSacks: "", costRate: "" });
+  const [openBatch, setOpenBatch] = useState(null);
+
+  useEffect(() => {
+    setForm(f => ({ ...f, date: today(), variantId: (state.gumVariants||[])[0]?.id || "" }));
+  }, []);
+
+  const variants = state.gumVariants || [];
+  const availGum = (state.gumStock || []).filter(g => !g.sold);
+  const allGum = state.gumStock || [];
+
+  const saveInward = () => {
+    const n = Number(form.numSacks); const sw = Number(form.sackWeight); const cr = Number(form.costRate) || 0;
+    if (!form.supplier || !form.variantId || !n || !sw) return;
+    const variant = variants.find(v => v.id === form.variantId);
+    const batchId = genId();
+    const newSacks = Array.from({ length: n }, () => ({
+      id: genId(), variantId: form.variantId, variantName: variant?.name || form.variantId,
+      sackWeight: sw, costRate: cr, supplier: form.supplier, invoiceNo: form.invoiceNo,
+      inwardDate: form.date, sold: false, batchId,
+    }));
+    update(s => { if (!s.gumStock) s.gumStock = []; s.gumStock = [...s.gumStock, ...newSacks]; });
+    setSaved(true);
+    setForm(f => ({ ...f, supplier: "", invoiceNo: "", numSacks: "", sackWeight: "", costRate: "" }));
+    setTimeout(() => { setSaved(false); setView("list"); }, 1800);
+  };
+
+  // Inward history grouped by batch
+  const batches = {};
+  allGum.forEach(g => {
+    const bk = g.batchId || g.id;
+    if (!batches[bk]) batches[bk] = { id: bk, date: g.inwardDate, supplier: g.supplier, invoiceNo: g.invoiceNo, variantId: g.variantId, variantName: g.variantName, sackWeight: g.sackWeight, costRate: g.costRate, sacks: [] };
+    batches[bk].sacks.push(g);
+  });
+  const batchList = Object.values(batches).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  if (view === "inward") return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
+        <div><div className="section-eyebrow">Gum Inward</div><h2>Add Gum Stock</h2></div>
+      </div>
+      {saved && <div className="ok-box">✓ Gum stock saved!</div>}
+      <div className="card">
+        <h3>Supplier & Details</h3>
+        <div className="g3" style={{ marginBottom: 12 }}>
+          <div><label className="lbl">Supplier Name</label><input value={form.supplier} onChange={e => setForm(f => ({...f, supplier: e.target.value}))} placeholder="Supplier name" /></div>
+          <div><label className="lbl">Invoice / Note No</label><input value={form.invoiceNo} onChange={e => setForm(f => ({...f, invoiceNo: e.target.value}))} placeholder="e.g. INV/001" /></div>
+          <div><label className="lbl">Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({...f, date: e.target.value}))} /></div>
+        </div>
+        <div className="g3">
+          <div>
+            <label className="lbl">Gum Variant</label>
+            <select value={form.variantId} onChange={e => setForm(f => ({...f, variantId: e.target.value}))}>
+              <option value="">Select variant</option>
+              {variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </div>
+          <div><label className="lbl">No. of Sacks</label><input type="number" inputMode="numeric" value={form.numSacks} onChange={e => setForm(f => ({...f, numSacks: e.target.value}))} placeholder="e.g. 10" /></div>
+          <div><label className="lbl">Weight per Sack (kg)</label><input type="number" inputMode="numeric" value={form.sackWeight} onChange={e => setForm(f => ({...f, sackWeight: e.target.value}))} placeholder="e.g. 25 or 30" /></div>
+        </div>
+        <div style={{ marginTop: 12, maxWidth: 220 }}>
+          <label className="lbl">Cost Rate (₹/kg)</label>
+          <input type="number" step="0.01" inputMode="numeric" value={form.costRate} onChange={e => setForm(f => ({...f, costRate: e.target.value}))} placeholder="e.g. 18" />
+        </div>
+        {form.numSacks && form.sackWeight && (
+          <div style={{ marginTop: 14, padding: "10px 14px", background: "#f5f0e8", borderRadius: 8, fontSize: 13 }}>
+            <strong>{form.numSacks} sacks × {form.sackWeight} kg = {fmt(Number(form.numSacks) * Number(form.sackWeight))} kg total</strong>
+            {form.costRate && <span style={{ color: "#8b6914", marginLeft: 10 }}>· {fmtRs(Number(form.numSacks) * Number(form.sackWeight) * Number(form.costRate))} cost value</span>}
+          </div>
+        )}
+        <button className="btn btn-dark" style={{ marginTop: 14 }} onClick={saveInward}
+          disabled={!form.supplier || !form.variantId || !form.numSacks || !form.sackWeight}>
+          ✓ Save Gum Inward
+        </button>
+      </div>
+    </div>
+  );
+
+  if (view === "history") return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="btn btn-outline btn-sm" onClick={() => setView("list")}>← Back</button>
+        <div><div className="section-eyebrow">Gum</div><h2>Inward History</h2></div>
+      </div>
+      {batchList.length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No gum inward yet.</span>
+        </div>
+      ) : (
+        <div className="card-flat">
+          {batchList.map((b, idx) => {
+            const isOpen = openBatch === b.id;
+            const availCount = b.sacks.filter(g => !g.sold).length;
+            const totalKg = b.sacks.length * Number(b.sackWeight || 0);
+            const variant = variants.find(v => v.id === b.variantId);
+            return (
+              <div key={b.id} style={{ borderBottom: idx < batchList.length - 1 ? "1px solid #e8eef8" : "none" }}>
+                <div onClick={() => setOpenBatch(p => p === b.id ? null : b.id)}
+                  style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, background: isOpen ? "#faf8f4" : "transparent" }}
+                  onMouseEnter={e => { if(!isOpen) e.currentTarget.style.background="#faf8f4"; }}
+                  onMouseLeave={e => { if(!isOpen) e.currentTarget.style.background="transparent"; }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 2, background: variant?.color || "#8b6914", flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{b.variantName}</span>
+                      <span className="tag tag-green">{b.sacks.length} sacks</span>
+                      {availCount < b.sacks.length && <span className="tag tag-red">{b.sacks.length - availCount} sold</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9a9080" }}>
+                      {fmtDate(b.date)} · {b.supplier}{b.invoiceNo ? ` · ${b.invoiceNo}` : ""} · {fmt(totalKg)} kg · {b.sackWeight} kg/sack
+                      {b.costRate > 0 && <span style={{ color: "#8b6914", marginLeft: 6 }}>· {fmtRate(b.costRate)}/kg</span>}
+                    </div>
+                  </div>
+                  <div style={{ color: "#c8b89a", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                </div>
+                {isOpen && (
+                  <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "12px 16px" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {b.sacks.map((g, i) => (
+                        <span key={g.id} style={{ background: g.sold ? "#fef0ee" : "#edf7f0", border: `1px solid ${g.sold ? "#f0c0ba" : "#b5dcc0"}`, borderRadius: 5, padding: "4px 10px", fontSize: 12, color: g.sold ? "#9a4030" : "#2d6a4f", fontWeight: 500 }}>
+                          Sack {i+1} — {fmt(g.sackWeight)} kg{g.sold ? " · sold" : ""}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: 12, color: "#6a6050" }}>
+                      {b.sacks.length} sacks · {availCount} available · {fmt(totalKg)} kg total
+                      {b.costRate > 0 && <span style={{ color: "#8b6914", marginLeft: 6, fontWeight: 600 }}>· {fmtRs(totalKg * Number(b.costRate))} cost value</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // ── MAIN LIST VIEW ──
+  const byVariant = {};
+  variants.forEach(v => { byVariant[v.id] = { ...v, sacks: [], totalKg: 0 }; });
+  availGum.forEach(g => {
+    if (!byVariant[g.variantId]) byVariant[g.variantId] = { id: g.variantId, name: g.variantName || g.variantId, color: "#8a8070", sacks: [], totalKg: 0 };
+    byVariant[g.variantId].sacks.push(g);
+    byVariant[g.variantId].totalKg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+  });
+  const totalGumKg = availGum.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
+        <div><div className="section-eyebrow">Gum Inventory</div><h2>Pasting Gum Stock</h2></div>
+        {!isEmployee && <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-outline" onClick={() => setView("history")}>📋 Inward History</button>
+          <button className="btn btn-dark" onClick={() => setView("inward")}>+ Add Inward</button>
+        </div>}
+      </div>
+      {availGum.length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🪣</div>
+          <div className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>No gum in stock yet.</div>
+          <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>
+            {!isEmployee && <button className="btn btn-dark btn-sm" onClick={() => setView("inward")}>Add Gum Inward</button>}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 13, color: "#6a6050", fontWeight: 500 }}>
+            {availGum.length} sacks available · {fmt(Math.round(totalGumKg))} kg total
+          </div>
+          {Object.values(byVariant).filter(v => v.sacks.length > 0).map(v => (
+            <div key={v.id} className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: 3, background: v.color }} />
+                  <span className="serif" style={{ fontSize: 20, fontWeight: 500 }}>{v.name}</span>
+                  <span className="tag" style={{ background: "#fef5e8", borderColor: "#f0d5a0", color: "#a05800" }}>{v.sacks.length} sack{v.sacks.length !== 1 ? "s" : ""}</span>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#6a6050" }}>{fmt(Math.round(v.totalKg))} kg</span>
+              </div>
+              {/* Group sacks by batch for clean display */}
+              {(() => {
+                const batchGroups = {};
+                v.sacks.forEach(g => {
+                  const bk = g.batchId || g.id;
+                  if (!batchGroups[bk]) batchGroups[bk] = { date: g.inwardDate, supplier: g.supplier, sackWeight: g.sackWeight, sacks: [] };
+                  batchGroups[bk].sacks.push(g);
+                });
+                return Object.values(batchGroups).sort((a, b) => new Date(a.date) - new Date(b.date)).map((bg, bi) => (
+                  <div key={bi} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: "#9a9080", marginBottom: 6 }}>
+                      {fmtDate(bg.date)} · {bg.supplier} · {bg.sackWeight} kg/sack
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {bg.sacks.map((g, si) => (
+                        <EditableGumSack key={g.id} sack={g} idx={si} update={update} />
+                      ))}
+                    </div>
+                  </div>
+                ));
+              })()}
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: "#9a9080" }}>{v.sacks.length} sack{v.sacks.length !== 1 ? "s" : ""} available</span>
+                <span style={{ fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(v.totalKg))} kg</span>
+              </div>
+            </div>
+          ))}
+          {/* Grand total bar */}
+          {Object.values(byVariant).filter(v => v.sacks.length > 0).length > 1 && (
+            <div style={{ padding: "12px 18px", background: "#1a1a1a", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#9a9080" }}>{availGum.length} sacks across all variants</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>{fmt(Math.round(totalGumKg))} kg total gum</span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── EDITABLE GUM SACK ──────────────────────────────────────────────────────
+function EditableGumSack({ sack, idx, update }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(sack.sackWeight));
+  const save = () => {
+    if (!val || isNaN(val)) { setEditing(false); return; }
+    update(s => { const i = (s.gumStock||[]).findIndex(x => x.id === sack.id); if (i !== -1) s.gumStock[i].sackWeight = Number(val); });
+    setEditing(false);
+  };
+  return (
+    <div style={{ background: "#f8f7f4", border: `1.5px solid ${editing ? "#8b6914" : "#e8e2d8"}`, borderRadius: 8, padding: "7px 10px", textAlign: "center", minWidth: 80 }}>
+      {editing ? (
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)}
+            style={{ width: 65, padding: "3px 6px", fontSize: 12, textAlign: "center" }} autoFocus
+            onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }} onBlur={save} />
+          <span style={{ fontSize: 10, color: "#9a9080" }}>kg</span>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 10, color: "#b0a898", marginBottom: 2 }}>#{idx+1}</div>
+          <div className="serif" style={{ fontSize: 18, lineHeight: 1 }}>{fmt(sack.sackWeight)}</div>
+          <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
+          <button onClick={() => { setEditing(true); setVal(String(sack.sackWeight)); }}
+            style={{ background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 4, padding: "2px 6px", fontSize: 9, cursor: "pointer", marginTop: 4, display: "block", width: "100%" }}>Edit</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── GUM SELL TAB ────────────────────────────────────────────────────────────
+function GumSellTab({ state, update }) {
+  const [customer, setCustomer] = useState("");
+  const [date, setDate] = useState(today());
+  const [transportBy, setTransportBy] = useState("");
+  const [selected, setSelected] = useState([]); // sack ids
+  const [sellRate, setSellRate] = useState("");
+  const [filterVariant, setFilterVariant] = useState("");
+  const [done, setDone] = useState(null);
+
+  const suggestedChallan = (() => {
+    const allSoldStock = [...(state.stock||[]).filter(r => r.sold && r.soldChallanNo && r.soldDate), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo && g.soldDate)];
+    const last = allSoldStock.sort((a, b) => new Date(b.soldDate||b.soldDate) - new Date(a.soldDate)).find(x => x.soldChallanNo)?.soldChallanNo || "";
+    if (!last) return "";
+    const m = last.match(/^(.*?)(\d+)$/);
+    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
+  })();
+  const [challanNo, setChallanNo] = useState(suggestedChallan);
+
+  const variants = state.gumVariants || [];
+  const availGum = (state.gumStock || []).filter(g => !g.sold);
+  const filtered = filterVariant ? availGum.filter(g => g.variantId === filterVariant) : availGum;
+  const selSacks = availGum.filter(g => selected.includes(g.id));
+  const totalKg = selSacks.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const totalValue = sellRate ? Number(sellRate) * totalKg : 0;
+
+  const toggleSack = id => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const selectAll = () => setSelected(filtered.map(g => g.id));
+  const clearAll = () => setSelected([]);
+
+  const sell = () => {
+    if (!customer || selected.length === 0) return;
+    update(s => {
+      if (!s.gumStock) s.gumStock = [];
+      s.gumStock = s.gumStock.map(g => {
+        if (!selected.includes(g.id)) return g;
+        return { ...g, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate: Number(sellRate) || 0, transportBy: transportBy.trim() || undefined };
+      });
+      if (customer.trim() && !(s.customers||[]).includes(customer.trim())) {
+        s.customers = [...(s.customers||[]), customer.trim()].sort();
+      }
+      if (transportBy.trim() && !(s.transporters||[]).includes(transportBy.trim())) {
+        s.transporters = [...(s.transporters||[]), transportBy.trim()].sort();
+      }
+    });
+    setDone({ count: selected.length, kg: totalKg, customer, val: totalValue });
+  };
+
+  if (done) return (
+    <div className="card fade-in" style={{ textAlign: "center", padding: 56 }}>
+      <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
+      <div className="serif" style={{ fontSize: 28 }}>Gum Sale Recorded</div>
+      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>{done.count} sacks · {fmt(done.kg)} kg{done.val ? ` · ${fmtRs(done.val)}` : ""} → {done.customer}</div>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setCustomer(""); setChallanNo(suggestedChallan); setSellRate(""); setTransportBy(""); }}>Record Another Sale</button>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
+      <div><div className="section-eyebrow">Gum Dispatch</div><h2>Sell Pasting Gum</h2></div>
+      <div className="card">
+        <h3>Sale Details</h3>
+        <div className="g3">
+          <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers||[]} placeholder="Customer name" /></div>
+          <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+          <div><label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 315" /></div>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="lbl">Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+          <TransporterInput value={transportBy} onChange={setTransportBy} transporters={state.transporters||[]} />
+        </div>
+      </div>
+      {customer && (
+        <div className="card">
+          <h3>Selling Rate — ₹/kg</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <input type="number" step="0.01" inputMode="numeric" value={sellRate} onChange={e => setSellRate(e.target.value)} placeholder="e.g. 24" style={{ width: 120 }} />
+            <span style={{ fontSize: 12, color: "#9a9080" }}>per kg (applied to all sacks in this challan)</span>
+            {totalKg > 0 && sellRate && <span style={{ fontSize: 14, fontWeight: 700, color: "#8b6914", marginLeft: "auto" }}>{fmtRs(totalValue)}</span>}
+          </div>
+        </div>
+      )}
+      <div className="card">
+        <h3>Select Gum Sacks to Sell</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ minWidth: 160 }}>
+            <label className="lbl">Filter Variant</label>
+            <select value={filterVariant} onChange={e => setFilterVariant(e.target.value)}>
+              <option value="">All Variants</option>
+              {variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "flex", gap: 6, paddingBottom: 2 }}>
+            <button className="btn btn-outline btn-sm" onClick={selectAll}>Select All ({filtered.length})</button>
+            <button className="btn btn-outline btn-sm" onClick={clearAll}>Clear</button>
+          </div>
+          <span style={{ fontSize: 12, color: "#9a9080", paddingBottom: 4 }}>{filtered.length} available · {selected.length} selected</span>
+        </div>
+        {availGum.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 24, color: "#b0a898" }}><span className="serif-italic">No gum sacks available.</span></div>
+        ) : (
+          <>
+            {/* Group by variant for display */}
+            {(filterVariant ? variants.filter(v => v.id === filterVariant) : variants).map(v => {
+              const vSacks = filtered.filter(g => g.variantId === v.id);
+              if (vSacks.length === 0) return null;
+              return (
+                <div key={v.id} style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: v.color }} />
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{v.name}</span>
+                    <span style={{ fontSize: 11, color: "#9a9080" }}>— {vSacks.length} sacks available</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                    {vSacks.map(g => {
+                      const sel = selected.includes(g.id);
+                      return (
+                        <div key={g.id} onClick={() => toggleSack(g.id)}
+                          style={{ cursor: "pointer", background: sel ? "#fdf9f0" : "#f8f7f4", border: `2px solid ${sel ? "#8b6914" : "#e8e2d8"}`, borderRadius: 9, padding: "8px 12px", textAlign: "center", minWidth: 80, transition: "all 0.1s" }}>
+                          <div style={{ width: 18, height: 18, border: `2px solid ${sel ? "#8b6914" : "#ccc"}`, borderRadius: 4, background: sel ? "#8b6914" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 4px" }}>
+                            {sel && <span style={{ color: "#fff", fontSize: 10 }}>✓</span>}
+                          </div>
+                          <div className="serif" style={{ fontSize: 18, lineHeight: 1 }}>{fmt(g.sackWeight)}</div>
+                          <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
+                          <div style={{ fontSize: 9, color: "#b0a898", marginTop: 2 }}>{fmtDate(g.inwardDate)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div className="card" style={{ border: "1.5px solid #ddd8ce" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div className="lbl">Selected for Sale</div>
+              <div className="serif" style={{ fontSize: 26, lineHeight: 1.1 }}>{selected.length} sacks · {fmt(totalKg)} kg</div>
+              {totalValue > 0 && <div style={{ fontSize: 14, color: "#8b6914", fontWeight: 700, marginTop: 4 }}>{fmtRs(totalValue)}</div>}
+              {!customer && <div style={{ fontSize: 11, color: "#b83020", marginTop: 6 }}>Enter customer name to confirm.</div>}
+            </div>
+            <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer}>✓ Confirm Sale</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── GUM REPORT ──────────────────────────────────────────────────────────────
+function GumReport({ state, soldData }) {
+  const variants = state.gumVariants || [];
+  const allGumSold = soldData || [];
+
+  // Simple period filter
+  const allMonths = [...new Set(allGumSold.map(g => monthKey(g.soldDate)).filter(Boolean))].sort().reverse();
+  const [selMonth, setSelMonth] = useState(allMonths[0] || "");
+  const [periodMode, setPeriodMode] = useState("all");
+
+  const periodSold = periodMode === "all" ? allGumSold : allGumSold.filter(g => monthKey(g.soldDate) === selMonth);
+
+  const totalKg = periodSold.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const totalSacks = periodSold.length;
+  const totalRevenue = periodSold.reduce((s, g) => s + (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const totalCost = periodSold.reduce((s, g) => s + (Number(g.costRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const totalProfit = totalRevenue - totalCost;
+
+  // By variant
+  const variantMap = {};
+  periodSold.forEach(g => {
+    const k = g.variantId;
+    const vName = variants.find(v => v.id === k)?.name || g.variantName || k;
+    if (!variantMap[k]) variantMap[k] = { name: vName, color: variants.find(v => v.id === k)?.color || "#8b6914", sacks: 0, kg: 0, revenue: 0, cost: 0 };
+    variantMap[k].sacks++;
+    variantMap[k].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    variantMap[k].revenue += (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    variantMap[k].cost += (Number(g.costRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+  });
+
+  // By customer
+  const custMap = {};
+  periodSold.forEach(g => {
+    const c = g.soldTo || "Unknown";
+    if (!custMap[c]) custMap[c] = { sacks: 0, kg: 0, revenue: 0, profit: 0 };
+    custMap[c].sacks++; custMap[c].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    custMap[c].revenue += (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    custMap[c].profit += ((Number(g.soldRate)||0) - (Number(g.costRate)||0)) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+  });
+  const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
+
+  // Monthly trend (last 6)
+  const last6 = allMonths.slice(0, 6).reverse();
+  const trendData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: allGumSold.filter(g => monthKey(g.soldDate) === m).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0) }));
+
+  // Variant split pie
+  const variantPie = Object.values(variantMap).filter(v => v.kg > 0).map(v => ({ label: v.name, value: v.kg }));
+
+  if (allGumSold.length === 0) return (
+    <div className="card" style={{ textAlign: "center", padding: 40 }}>
+      <div style={{ fontSize: 36, marginBottom: 12 }}>🪣</div>
+      <span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No gum sales yet.</span>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Period bar */}
+      <div className="card" style={{ padding: "12px 16px" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div>
+            <label className="lbl">Period</label>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[["all","All Time"],["month","Month"]].map(([v, l]) => (
+                <button key={v} onClick={() => setPeriodMode(v)}
+                  style={{ padding: "6px 12px", borderRadius: 6, border: "1.5px solid", fontSize: 12, cursor: "pointer", fontWeight: periodMode === v ? 700 : 400, background: periodMode === v ? "#1a1a1a" : "#fff", color: periodMode === v ? "#fff" : "#6a6050", borderColor: periodMode === v ? "#1a1a1a" : "#ddd8ce" }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          {periodMode === "month" && (
+            <div>
+              <label className="lbl">Month</label>
+              <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
+                {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+        {[
+          { label: "Sacks Sold", val: totalSacks, unit: "sacks" },
+          { label: "Total Weight", val: fmt(Math.round(totalKg)) + " kg", unit: (totalKg/1000).toFixed(2) + " tons" },
+          { label: "Revenue", val: totalRevenue > 0 ? fmtRs(totalRevenue) : "—", unit: "gross" },
+          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+        ].map(k => (
+          <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
+            <div className="lbl">{k.label}</div>
+            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Key insights */}
+      {periodSold.length > 0 && (
+        <div className="card" style={{ background: "linear-gradient(135deg, #1a2a10 0%, #253520 100%)", border: "none" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#4a7a30", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 14 }}>⚡ Key Insights</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {totalKg > 0 && totalRevenue > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.07)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#90c070" }}>Avg sell rate</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#e8c84a" }}>{fmtRate(totalRevenue/totalKg)}/kg</span>
+            </div>}
+            {Object.values(variantMap).length > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.07)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#90c070" }}>Top variant</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+                {Object.values(variantMap).sort((a,b) => b.kg-a.kg)[0]?.name} <span style={{ fontSize: 11, color: "#5a9040" }}>({fmt(Math.round(Object.values(variantMap).sort((a,b) => b.kg-a.kg)[0]?.kg || 0))} kg)</span>
+              </span>
+            </div>}
+            {top5Cust[0] && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.07)", borderRadius: 8 }}>
+              <span style={{ fontSize: 12, color: "#90c070" }}>Top customer</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{top5Cust[0][0]} <span style={{ fontSize: 11, color: "#5a9040" }}>({top5Cust[0][1].sacks} sacks)</span></span>
+            </div>}
+            {totalProfit > 0 && totalKg > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(45,106,79,0.25)", borderRadius: 8, border: "1px solid rgba(45,106,79,0.4)" }}>
+              <span style={{ fontSize: 12, color: "#7ecfa0" }}>Profit per kg</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#7ecfa0" }}>{fmtRate(totalProfit/totalKg)}/kg</span>
+            </div>}
+          </div>
+        </div>
+      )}
+
+      {/* Variant breakdown */}
+      {Object.values(variantMap).length > 0 && (
+        <div className="card">
+          <h3>By Variant</h3>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+            {variantPie.length > 1 && <PieChart data={variantPie} size={130} />}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 12 }}>
+              <thead><tr><th>Variant</th><th>Sacks</th><th>kg</th><th>Revenue</th><th>Profit</th><th>Margin</th></tr></thead>
+              <tbody>
+                {Object.entries(variantMap).sort((a, b) => b[1].kg - a[1].kg).map(([k, v]) => {
+                  const profit = v.revenue - v.cost;
+                  const margin = v.revenue > 0 ? (profit/v.revenue*100).toFixed(1) : "—";
+                  const color = profit >= 0 ? "#2d6a4f" : "#b83020";
+                  return (
+                    <tr key={k}>
+                      <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 2, background: v.color }} />{v.name}</div></td>
+                      <td>{v.sacks}</td>
+                      <td>{fmt(Math.round(v.kg))}</td>
+                      <td>{v.revenue > 0 ? fmtRs(v.revenue) : "—"}</td>
+                      <td style={{ color, fontWeight: 700 }}>{v.revenue > 0 ? fmtRs(profit) : "—"}</td>
+                      <td style={{ color }}>{margin !== "—" ? margin + "%" : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly trend */}
+      {trendData.length > 1 && (
+        <div className="card">
+          <h3>Monthly Volume Trend (kg)</h3>
+          <BarChart data={trendData} color="#6a8a3a" />
+        </div>
+      )}
+
+      {/* Top customers */}
+      {top5Cust.length > 0 && (
+        <div className="card">
+          <h3>Top Customers</h3>
+          {top5Cust.map(([name, data], idx) => {
+            const barW = top5Cust[0] ? (data.kg / top5Cust[0][1].kg) * 100 : 0;
+            return (
+              <div key={name} style={{ padding: "12px 0", borderBottom: idx < top5Cust.length-1 ? "1px solid #e8eef8" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 26, height: 26, background: CHART_COLORS[idx], borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700 }}>{idx+1}</div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
+                      <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{data.sacks} sacks · {fmt(Math.round(data.kg))} kg</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    {data.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 700 }}>{fmtRs(data.revenue)}</div>}
+                    {data.profit !== 0 && data.revenue > 0 && <div style={{ fontSize: 11, color: data.profit >= 0 ? "#2d6a4f" : "#b83020" }}>{fmtRs(data.profit)} profit</div>}
+                  </div>
+                </div>
+                <div style={{ background: "#e8eef8", borderRadius: 3, height: 3, overflow: "hidden" }}>
+                  <div style={{ width: `${barW}%`, height: "100%", background: CHART_COLORS[idx], borderRadius: 3 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Inward history summary */}
+      {(() => {
+        const allBatches = {};
+        (state.gumStock||[]).forEach(g => {
+          const bk = g.batchId || g.id;
+          if (!allBatches[bk]) allBatches[bk] = { date: g.inwardDate, supplier: g.supplier, variantName: g.variantName, sackWeight: g.sackWeight, total: 0, sold: 0 };
+          allBatches[bk].total++;
+          if (g.sold) allBatches[bk].sold++;
+        });
+        const batches = Object.values(allBatches).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6);
+        if (batches.length === 0) return null;
+        return (
+          <div className="card">
+            <h3>Recent Inward Batches</h3>
+            <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+              {batches.map((b, i) => (
+                <div key={i} style={{ padding: "10px 14px", borderBottom: i < batches.length-1 ? "1px solid #f0ece4" : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{b.variantName} <span style={{ fontSize: 11, color: "#9a9080" }}>· {b.supplier}</span></div>
+                    <div style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(b.date)} · {b.sackWeight} kg/sack</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{b.total} sacks</div>
+                    <div style={{ fontSize: 11, color: b.sold === b.total ? "#b83020" : "#2d6a4f" }}>{b.total - b.sold} remaining</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 function SettingsTab({ state, update }) {
   const [newGrade, setNewGrade] = useState({ bf: "", gsm: "", shade: "golden" });
@@ -4547,19 +5543,41 @@ function SettingsTab({ state, update }) {
         <button className="btn btn-dark" style={{ marginTop: 12 }} onClick={addGrade}>+ Add Grade</button>
       </div>
       <div className="card">
+        <h3>Pasting Gum Variants</h3>
+        <p style={{ fontSize: 12, color: "#8a8070", marginBottom: 12, lineHeight: 1.6 }}>Name your gum variants once you receive the bill tomorrow. These names appear throughout inward, sales, history and reports.</p>
+        {(state.gumVariants || []).map((v, vi) => (
+          <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0", borderBottom: "1px solid #f0ece4" }}>
+            <div style={{ width: 14, height: 14, borderRadius: 3, background: v.color, flexShrink: 0 }} />
+            <input value={v.name} onChange={e => update(s => { s.gumVariants[vi].name = e.target.value; })}
+              style={{ flex: 1, maxWidth: 260 }} placeholder="e.g. Tapioca Gum" />
+            <input value={v.color} type="color" onChange={e => update(s => { s.gumVariants[vi].color = e.target.value; })}
+              style={{ width: 36, height: 32, padding: 2, border: "1.5px solid #ddd8ce", borderRadius: 6, cursor: "pointer" }} />
+            {(state.gumVariants||[]).length > 1 && (
+              <button onClick={() => update(s => { s.gumVariants = s.gumVariants.filter(x => x.id !== v.id); })}
+                style={{ background: "transparent", color: "#b83020", border: "1.5px solid #f0c0ba", borderRadius: 6, padding: "4px 10px", fontSize: 12 }}>Remove</button>
+            )}
+          </div>
+        ))}
+        <button className="btn btn-outline btn-sm" style={{ marginTop: 10 }}
+          onClick={() => update(s => { s.gumVariants = [...(s.gumVariants||[]), { id: genId(), name: "New Variant", color: "#8a6a3a" }]; })}>
+          + Add Variant
+        </button>
+      </div>
+      <div className="card">
         <h3>Data & Sync</h3>
         <p style={{ fontSize: 13, color: "#8a8070", lineHeight: 1.7 }}>All data saves to Firebase in real time. Any change made on one device appears instantly on all others — phones, laptops, tablets.</p>
         <div style={{ marginTop: 12, display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "#9a9080" }}>
           <span>📦 {state.stock.filter(r => r.productType !== "liner").length} reels</span>
           <span>📄 {state.stock.filter(r => r.productType === "liner").length} liners</span>
-          <span>✅ {state.stock.filter(r => r.sold).length} sold</span>
+          <span>🪣 {(state.gumStock||[]).filter(g => !g.sold).length} gum sacks</span>
+          <span>✅ {state.stock.filter(r => r.sold).length + (state.gumStock||[]).filter(g => g.sold).length} sold</span>
           <span>📊 {[...new Set(state.stock.filter(r => r.sold).map(r => monthKey(r.soldDate)).filter(Boolean))].length} months of data</span>
         </div>
       </div>
       <div className="card" style={{ border: "1px solid #f0c0ba" }}>
         <h3 style={{ color: "#b83020" }}>Danger Zone</h3>
         <p style={{ fontSize: 13, color: "#8a8070", marginBottom: 14 }}>Permanently deletes all stock and sales data. Cannot be undone.</p>
-        <button style={{ background: "transparent", color: "#b83020", border: "1.5px solid #f0c0ba", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }} onClick={() => { if (window.confirm("Delete ALL data? This cannot be undone.")) update(s => Object.assign(s, INITIAL_STATE)); }}>Clear All Data</button>
+        <button style={{ background: "transparent", color: "#b83020", border: "1.5px solid #f0c0ba", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }} onClick={() => { if (window.confirm("Delete ALL data? This cannot be undone.")) update(s => Object.assign(s, INITIAL_STATE, { gumStock: [], gumVariants: INITIAL_STATE.gumVariants })); }}>Clear All Data</button>
       </div>
     </div>
   );
