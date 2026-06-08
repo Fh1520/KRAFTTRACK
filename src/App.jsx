@@ -551,7 +551,6 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
           linerBySpec[k].kg += Number(r.weight);
         });
         const totalLinerKg = availLiners.reduce((s, r) => s + Number(r.weight), 0);
-        // Group by grade
         const byGrade = {};
         Object.values(linerBySpec).forEach(x => {
           const gk = `${x.bf}|${x.gsm}`;
@@ -603,6 +602,63 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
                 </div>
               </div>
             ))}
+          </>
+        );
+      })()}
+
+      {/* ── GUM SUMMARY SECTION ── */}
+      {(() => {
+        const availGum = (state.gumStock || []).filter(g => !g.sold);
+        const soldGum = (state.gumStock || []).filter(g => g.sold);
+        if ((state.gumStock || []).length === 0) return null;
+        const totalAvailKg = availGum.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+        const byVariant = {};
+        (state.gumVariants || []).forEach(v => { byVariant[v.id] = { ...v, sacks: 0, kg: 0 }; });
+        availGum.forEach(g => {
+          if (!byVariant[g.variantId]) byVariant[g.variantId] = { id: g.variantId, name: g.variantName || g.variantId, color: "#8a8070", sacks: 0, kg: 0 };
+          byVariant[g.variantId].sacks++;
+          byVariant[g.variantId].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+        });
+        const variantList = Object.values(byVariant).filter(v => v.sacks > 0);
+        return (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Pasting Gum</span>
+              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+            </div>
+            <div className="g3">
+              {[
+                { label: "Available Sacks", val: availGum.length, unit: "in stock" },
+                { label: "Sacks Sold", val: soldGum.length, unit: "dispatched" },
+                { label: "Available Weight", val: (totalAvailKg / 1000).toFixed(2), unit: "metric tons" },
+              ].map(s => (
+                <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
+                  <div className="lbl">{s.label}</div>
+                  <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
+                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
+                </div>
+              ))}
+            </div>
+            {variantList.length > 0 && (
+              <div className="card">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span className="serif" style={{ fontSize: 16, fontWeight: 500 }}>🪣 By Variant</span>
+                  <span style={{ fontSize: 12, color: "#9a9080" }}>{availGum.length} sack{availGum.length !== 1 ? "s" : ""} · {fmt(Math.round(totalAvailKg))} kg available</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {variantList.map(v => (
+                    <div key={v.id} style={{ background: "#fef9f0", border: "1px solid #f0d5a0", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 2, background: v.color || "#8b6914", flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v.name}</div>
+                        <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         );
       })()}
@@ -749,7 +805,7 @@ function SizeInwardHistory({ sz, inwardGroups }) {
 }
 
 // ─── SIZE OUTWARD HISTORY (collapsible challans) ──────────────────────────────
-function SizeOutwardHistory({ sz, challanList, state }) {
+function SizeOutwardHistory({ sz, challanList }) {
   const [open, setOpen] = useState(null);
   const sorted = [...challanList].sort((a, b) => new Date(a.date) - new Date(b.date));
   return (
@@ -799,59 +855,6 @@ function SizeOutwardHistory({ sz, challanList, state }) {
         </div>
       )}
 
-      {/* ── GUM SUMMARY SECTION ── */}
-      {(() => {
-        const variants = state.gumVariants || [];
-        const availGum = (state.gumStock || []).filter(g => !g.sold);
-        if (availGum.length === 0) return null;
-        const totalSacks = availGum.length;
-        const totalGumKg = availGum.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
-        const byVariant = {};
-        variants.forEach(v => { byVariant[v.id] = { ...v, sacks: 0, kg: 0 }; });
-        availGum.forEach(g => {
-          if (!byVariant[g.variantId]) byVariant[g.variantId] = { id: g.variantId, name: g.variantName || g.variantId, color: "#8a8070", sacks: 0, kg: 0 };
-          byVariant[g.variantId].sacks++;
-          byVariant[g.variantId].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
-        });
-        const variantList = Object.values(byVariant).filter(v => v.sacks > 0);
-        return (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
-              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Pasting Gum</span>
-              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-            </div>
-            <div className="g3">
-              {[
-                { label: "Total Sacks", val: totalSacks, unit: "available" },
-                { label: "Total Weight", val: (totalGumKg / 1000).toFixed(2), unit: "metric tons" },
-                { label: "Variants", val: variantList.length, unit: "in stock" },
-              ].map(s => (
-                <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
-                  <div className="lbl">{s.label}</div>
-                  <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
-                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
-                </div>
-              ))}
-            </div>
-            {variantList.map(v => (
-              <div key={v.id} className="card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 12, height: 12, borderRadius: 3, background: v.color || "#8b6914" }} />
-                    <span className="serif" style={{ fontSize: 17, fontWeight: 500 }}>{v.name}</span>
-                    <span className="tag" style={{ background: "#fef5e8", borderColor: "#f0d5a0", color: "#a05800" }}>Pasting Gum</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "#9a9080" }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
-                </div>
-                <div style={{ fontSize: 12, color: "#6a6050" }}>
-                  Avg sack weight: {v.sacks > 0 ? fmt(Math.round(v.kg / v.sacks)) : "—"} kg/sack
-                </div>
-              </div>
-            ))}
-          </>
-        );
-      })()}
     </div>
   );
 }
@@ -1252,7 +1255,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
               </div>
             )}
             <SizeInwardHistory sz={sz} inwardGroups={gd.inwardGroups} />
-            <SizeOutwardHistory sz={sz} challanList={gd.challanList} state={state} />
+            <SizeOutwardHistory sz={sz} challanList={gd.challanList} />
             {gi < gradeData.length - 1 && <div style={{ height: 1, background: "#e8e2d8", margin: "6px 0" }} />}
           </div>
         ))}
