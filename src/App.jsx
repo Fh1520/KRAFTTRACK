@@ -1642,14 +1642,27 @@ function SellTab({ state, update }) {
   const [date, setDate] = useState(today());
   const [transportBy, setTransportBy] = useState("");
 
-  const suggestedChallan = (() => {
-    const last = state.stock
-      .filter(r => r.sold && r.soldChallanNo && r.soldDate)
-      .sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate))[0]?.soldChallanNo || "";
-    if (!last) return "";
-    const m = last.match(/^(.*?)(\d+)$/);
-    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
+  const { lastChallanNo, suggestedChallan, existingChallans } = (() => {
+    const allSoldItems = [
+      ...state.stock.filter(r => r.sold && r.soldChallanNo),
+      ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo),
+    ];
+    const existing = new Set(allSoldItems.map(r => String(r.soldChallanNo).trim()));
+    const lastEntry = allSoldItems.sort((a, b) => new Date(b.soldDate||0) - new Date(a.soldDate||0))[0];
+    const last = lastEntry?.soldChallanNo || "";
+    let suggested = "";
+    if (last) {
+      const m = last.match(/^(.*?)(\d+)$/);
+      if (m) {
+        const prefix = m[1];
+        let maxNum = 0;
+        existing.forEach(ch => { const mm = ch.match(/^(.*?)(\d+)$/); if (mm && mm[1] === prefix) maxNum = Math.max(maxNum, parseInt(mm[2], 10)); });
+        suggested = prefix + (maxNum + 1);
+      }
+    }
+    return { lastChallanNo: last, suggestedChallan: suggested, existingChallans: existing };
   })();
+
   const [challanNo, setChallanNo] = useState(suggestedChallan);
   const [selected, setSelected] = useState([]);
   const [selectedGumIds, setSelectedGumIds] = useState([]);
@@ -1657,8 +1670,6 @@ function SellTab({ state, update }) {
   const [filter, setFilter] = useState({ bf: "", gsm: "", size: "" });
   const [done, setDone] = useState(null);
   const [sellRates, setSellRates] = useState({}); // "bf|gsm" -> rate string
-
-  // Auto-load rates from customerData when customer changes
   useEffect(() => {
     if (!customer || !state.customerData?.[customer]) { setSellRates({}); return; }
     const hist = state.customerData[customer]?.rateHistory || {};
@@ -1760,8 +1771,16 @@ function SellTab({ state, update }) {
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers || []} /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div>
-            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313" />
+            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · suggested</span> : ""}</label>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313"
+              style={{ borderColor: challanNo && existingChallans.has(String(challanNo).trim()) ? "#b83020" : undefined }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+              {lastChallanNo && <span style={{ fontSize: 10, color: "#9a9080" }}>Last: <strong>{lastChallanNo}</strong></span>}
+              {suggestedChallan && <span style={{ fontSize: 10, color: "#8b6914", cursor: "pointer", textDecoration: "underline" }} onClick={() => setChallanNo(suggestedChallan)}>Use {suggestedChallan}</span>}
+            </div>
+            {challanNo && existingChallans.has(String(challanNo).trim()) && (
+              <div style={{ fontSize: 11, color: "#b83020", marginTop: 4, fontWeight: 600 }}>⚠ Challan {challanNo} already exists!</div>
+            )}
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
@@ -1770,7 +1789,6 @@ function SellTab({ state, update }) {
         </div>
       </div>
 
-      {/* Sell rates per grade */}
       {customer && (
         <div className="card">
           <h3>Selling Rates — ₹/kg {!selGrades.length && <span style={{ fontWeight: 400, color: "#9a9080", fontSize: 11 }}>(select reels to see grades)</span>}</h3>
@@ -2424,14 +2442,21 @@ function LinerSellTab({ state, update }) {
   const [done, setDone] = useState(null);
   const [transportBy, setTransportBy] = useState("");
 
-  // Shared challan sequence across reels + liner
-  const suggestedChallan = (() => {
-    const last = state.stock
-      .filter(r => r.sold && r.soldChallanNo && r.soldDate)
-      .sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate))[0]?.soldChallanNo || "";
-    if (!last) return "";
-    const m = last.match(/^(.*?)(\d+)$/);
-    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
+  // Shared challan sequence across reels + liner + gum
+  const { lastChallanNo: linerLastChallan, suggestedChallan, existingChallans: linerExistingChallans } = (() => {
+    const allSoldItems = [...state.stock.filter(r => r.sold && r.soldChallanNo), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo)];
+    const existing = new Set(allSoldItems.map(r => String(r.soldChallanNo).trim()));
+    const last = allSoldItems.sort((a, b) => new Date(b.soldDate||0) - new Date(a.soldDate||0))[0]?.soldChallanNo || "";
+    let suggested = "";
+    if (last) {
+      const m = last.match(/^(.*?)(\d+)$/);
+      if (m) {
+        const prefix = m[1]; let maxNum = 0;
+        existing.forEach(ch => { const mm = ch.match(/^(.*?)(\d+)$/); if (mm && mm[1] === prefix) maxNum = Math.max(maxNum, parseInt(mm[2], 10)); });
+        suggested = prefix + (maxNum + 1);
+      }
+    }
+    return { lastChallanNo: last, suggestedChallan: suggested, existingChallans: existing };
   })();
   const [challanNo, setChallanNo] = useState(suggestedChallan);
 
@@ -2495,7 +2520,15 @@ function LinerSellTab({ state, update }) {
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div>
             <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 314" />
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 314"
+              style={{ borderColor: challanNo && linerExistingChallans.has(String(challanNo).trim()) ? "#b83020" : undefined }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+              {linerLastChallan && <span style={{ fontSize: 10, color: "#9a9080" }}>Last: <strong>{linerLastChallan}</strong></span>}
+              {suggestedChallan && <span style={{ fontSize: 10, color: "#8b6914", cursor: "pointer", textDecoration: "underline" }} onClick={() => setChallanNo(suggestedChallan)}>Use {suggestedChallan}</span>}
+            </div>
+            {challanNo && linerExistingChallans.has(String(challanNo).trim()) && (
+              <div style={{ fontSize: 11, color: "#b83020", marginTop: 4, fontWeight: 600 }}>⚠ Challan {challanNo} already exists!</div>
+            )}
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
@@ -2721,12 +2754,15 @@ function HistoryTab({ state, update }) {
   const custStats = {};
   Object.values(challanMap).forEach(ch => {
     const c = ch.customer || "Unknown";
-    if (!custStats[c]) custStats[c] = { reels: 0, kg: 0, challans: 0, lastDate: "", sizes: {}, gumSacks: 0, gumKg: 0, gumRevenue: 0 };
+    if (!custStats[c]) custStats[c] = { reels: 0, liners: 0, kg: 0, challans: 0, lastDate: "", sizes: {}, gumSacks: 0, gumKg: 0, gumRevenue: 0 };
     custStats[c].challans++;
-    custStats[c].reels += ch.reels.length;
+    const reelsOnly = ch.reels.filter(r => r.productType !== "liner");
+    const linersOnly = ch.reels.filter(r => r.productType === "liner");
+    custStats[c].reels += reelsOnly.length;
+    custStats[c].liners += linersOnly.length;
     custStats[c].kg += ch.reels.reduce((s, r) => s + Number(r.weight), 0);
     if (!custStats[c].lastDate || ch.date > custStats[c].lastDate) custStats[c].lastDate = ch.date;
-    ch.reels.forEach(r => { custStats[c].sizes[r.size] = (custStats[c].sizes[r.size] || 0) + 1; });
+    reelsOnly.forEach(r => { custStats[c].sizes[r.size] = (custStats[c].sizes[r.size] || 0) + 1; });
   });
   // Merge gum data into customer stats
   Object.values(gumChallanMap).forEach(ch => {
@@ -3030,7 +3066,7 @@ function HistoryTab({ state, update }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
                     <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>
-                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels · {fmt(Math.round(cs.kg))} kg{cs.gumSacks > 0 ? ` · ${cs.gumSacks} gum sack${cs.gumSacks !== 1 ? "s" : ""}` : ""}{topSz ? ` · Top: ${topSz[0]}"` : ""}
+                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels{cs.liners > 0 ? ` · ${cs.liners} liners` : ""} · {fmt(Math.round(cs.kg))} kg{cs.gumSacks > 0 ? ` · ${cs.gumSacks} gum sack${cs.gumSacks !== 1 ? "s" : ""}` : ""}{topSz ? ` · Top: ${topSz[0]}"` : ""}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -3057,14 +3093,21 @@ function HistoryTab({ state, update }) {
     const cs = custStats[selCustomer] || {};
     const cd = state.customerData?.[selCustomer] || {};
     const custChallans = Object.values(challanMap).filter(c => (c.customer || "") === selCustomer);
-    const reelRevenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
-    const reelProfit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
+    // Separate reels (non-liner) from liners
+    const custReelsSold = state.stock.filter(r => r.sold && r.soldTo === selCustomer && r.productType !== "liner");
+    const custLinersSold = state.stock.filter(r => r.sold && r.soldTo === selCustomer && r.productType === "liner");
+    const reelRevenue = custReelsSold.reduce((s, r) => s + (Number(r.soldRate)||0) * Number(r.weight), 0);
+    const reelProfit = custReelsSold.reduce((s, r) => s + ((Number(r.soldRate)||0) - (Number(r.costRate)||0)) * Number(r.weight), 0);
+    const reelKg = custReelsSold.reduce((s, r) => s + Number(r.weight), 0);
+    const linerRevenue = custLinersSold.reduce((s, r) => s + (Number(r.soldRate)||0) * Number(r.weight), 0);
+    const linerProfit = custLinersSold.reduce((s, r) => s + ((Number(r.soldRate)||0) - (Number(r.costRate)||0)) * Number(r.weight), 0);
+    const linerKg = custLinersSold.reduce((s, r) => s + Number(r.weight), 0);
     const gumRevenue = cs.gumRevenue || 0;
     const custGumSold = (state.gumStock||[]).filter(g => g.sold && g.soldTo === selCustomer);
     const gumProfit = custGumSold.reduce((s, g) => s + ((Number(g.soldRate)||0) - (Number(g.costRate)||0)) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
-    const revenue = reelRevenue + gumRevenue;
-    const profit = reelProfit + gumProfit;
-    return { cs, cd, revenue, profit, reelRevenue, reelProfit, gumRevenue, gumProfit, custChallans, custGumSold };
+    const revenue = reelRevenue + linerRevenue + gumRevenue;
+    const profit = reelProfit + linerProfit + gumProfit;
+    return { cs, cd, revenue, profit, reelRevenue, reelProfit, reelKg, linerRevenue, linerProfit, linerKg, custLinersSold, gumRevenue, gumProfit, custChallans, custGumSold, custReelsSold };
   })() : null;
 
   // Bulk apply: compute preview
@@ -3158,12 +3201,15 @@ function HistoryTab({ state, update }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {[
                 { label: "Challans", val: custLedger.cs.challans || 0 },
-                { label: "Reels", val: custLedger.cs.reels || 0 },
+                { label: "Reels", val: custLedger.custReelsSold?.length || 0 },
+                { label: "Liners", val: custLedger.custLinersSold?.length || 0 },
                 { label: "Gum Sacks", val: custLedger.cs.gumSacks || 0 },
                 { label: "Revenue", val: custLedger.revenue ? fmtRs(custLedger.revenue) : "—" },
                 { label: "Profit", val: custLedger.profit ? fmtRs(custLedger.profit) : "—" },
-              ].map(s => (
-                <div key={s.label} style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 80, textAlign: "center" }}>
+              ].filter(s => s.label !== "Liners" || custLedger.custLinersSold?.length > 0)
+               .filter(s => s.label !== "Gum Sacks" || custLedger.cs.gumSacks > 0)
+               .map(s => (
+                <div key={s.label} style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 72, textAlign: "center" }}>
                   <div style={{ fontSize: 10, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{s.label}</div>
                   <div style={{ fontWeight: 700, fontSize: 15, color: s.label === "Profit" && custLedger.profit < 0 ? "#b83020" : "#1a1a1a" }}>{s.val}</div>
                 </div>
@@ -3219,9 +3265,47 @@ function HistoryTab({ state, update }) {
               </div>
               {custLedger.cs.sizes && (
                 <div style={{ marginTop: 12, fontSize: 12, color: "#8b6914" }}>
-                  Top sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,5).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
+                  Top reel sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,5).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Liner sold summary in overview */}
+          {ledgerTab === "overview" && custLedger && custLedger.custLinersSold?.length > 0 && (
+            <div className="card" style={{ padding: "14px 16px", background: "#f0f8f4", border: "1.5px solid #b5dcc0" }}>
+              <h3 style={{ color: "#2d6a4f", marginBottom: 12 }}>📄 Liners Sold to This Customer</h3>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                {[
+                  { label: "Liners Sold", val: custLedger.custLinersSold.length },
+                  { label: "Total Kg", val: fmt(Math.round(custLedger.linerKg)) + " kg" },
+                  { label: "Revenue", val: custLedger.linerRevenue > 0 ? fmtRs(custLedger.linerRevenue) : "—" },
+                  { label: "Profit", val: custLedger.linerProfit !== 0 && custLedger.linerRevenue > 0 ? fmtRs(custLedger.linerProfit) : "—" },
+                ].map(s => (
+                  <div key={s.label} style={{ background: "#fff", border: "1px solid #b5dcc0", borderRadius: 8, padding: "8px 12px", flex: 1, minWidth: 72, textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#2d6a4f", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1a1a1a" }}>{s.val}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Show liner specs */}
+              {(() => {
+                const specMap = {};
+                custLedger.custLinersSold.forEach(r => {
+                  const k = `${r.bf} BF ${r.gsm} GSM ${r.size}"`;
+                  if (!specMap[k]) specMap[k] = { count: 0, kg: 0 };
+                  specMap[k].count++; specMap[k].kg += Number(r.weight);
+                });
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {Object.entries(specMap).sort((a,b) => b[1].kg - a[1].kg).map(([spec, d]) => (
+                      <span key={spec} style={{ background: "#edf7f0", border: "1px solid #b5dcc0", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#2d6a4f", fontWeight: 500 }}>
+                        {spec} · {d.count}× · {fmt(Math.round(d.kg))} kg
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -5194,12 +5278,20 @@ function GumSellTab({ state, update }) {
   const [filterVariant, setFilterVariant] = useState("");
   const [done, setDone] = useState(null);
 
-  const suggestedChallan = (() => {
-    const allSoldStock = [...(state.stock||[]).filter(r => r.sold && r.soldChallanNo && r.soldDate), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo && g.soldDate)];
-    const last = allSoldStock.sort((a, b) => new Date(b.soldDate||b.soldDate) - new Date(a.soldDate)).find(x => x.soldChallanNo)?.soldChallanNo || "";
-    if (!last) return "";
-    const m = last.match(/^(.*?)(\d+)$/);
-    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
+  const { lastChallanNo: gumLastChallan, suggestedChallan, existingChallans: gumExistingChallans } = (() => {
+    const allSoldItems = [...(state.stock||[]).filter(r => r.sold && r.soldChallanNo), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo)];
+    const existing = new Set(allSoldItems.map(r => String(r.soldChallanNo).trim()));
+    const last = allSoldItems.sort((a, b) => new Date(b.soldDate||0) - new Date(a.soldDate||0))[0]?.soldChallanNo || "";
+    let suggested = "";
+    if (last) {
+      const m = last.match(/^(.*?)(\d+)$/);
+      if (m) {
+        const prefix = m[1]; let maxNum = 0;
+        existing.forEach(ch => { const mm = ch.match(/^(.*?)(\d+)$/); if (mm && mm[1] === prefix) maxNum = Math.max(maxNum, parseInt(mm[2], 10)); });
+        suggested = prefix + (maxNum + 1);
+      }
+    }
+    return { lastChallanNo: last, suggestedChallan: suggested, existingChallans: existing };
   })();
   const [challanNo, setChallanNo] = useState(suggestedChallan);
 
@@ -5250,7 +5342,16 @@ function GumSellTab({ state, update }) {
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers||[]} placeholder="Customer name" /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div><label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 315" /></div>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 315"
+              style={{ borderColor: challanNo && gumExistingChallans.has(String(challanNo).trim()) ? "#b83020" : undefined }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+              {gumLastChallan && <span style={{ fontSize: 10, color: "#9a9080" }}>Last: <strong>{gumLastChallan}</strong></span>}
+              {suggestedChallan && <span style={{ fontSize: 10, color: "#8b6914", cursor: "pointer", textDecoration: "underline" }} onClick={() => setChallanNo(suggestedChallan)}>Use {suggestedChallan}</span>}
+            </div>
+            {challanNo && gumExistingChallans.has(String(challanNo).trim()) && (
+              <div style={{ fontSize: 11, color: "#b83020", marginTop: 4, fontWeight: 600 }}>⚠ Challan {challanNo} already exists!</div>
+            )}
+          </div>
         </div>
         <div style={{ marginTop: 10 }}>
           <label className="lbl">Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
@@ -5342,12 +5443,21 @@ function GumReport({ state, soldData }) {
   const variants = state.gumVariants || [];
   const allGumSold = soldData || [];
 
-  // Simple period filter
   const allMonths = [...new Set(allGumSold.map(g => monthKey(g.soldDate)).filter(Boolean))].sort().reverse();
   const [selMonth, setSelMonth] = useState(allMonths[0] || "");
+  const [selDate, setSelDate] = useState(today());
+  const [selWeek, setSelWeek] = useState(toISOWeek(new Date()));
   const [periodMode, setPeriodMode] = useState("all");
 
-  const periodSold = periodMode === "all" ? allGumSold : allGumSold.filter(g => monthKey(g.soldDate) === selMonth);
+  const periodSold = (() => {
+    if (periodMode === "all") return allGumSold;
+    if (periodMode === "day") return allGumSold.filter(g => g.soldDate === selDate);
+    if (periodMode === "week") { const [mon, sun] = weekToRange(selWeek); return allGumSold.filter(g => { const d = new Date(g.soldDate); return d >= mon && d <= sun; }); }
+    if (periodMode === "month") return allGumSold.filter(g => monthKey(g.soldDate) === selMonth);
+    return allGumSold;
+  })();
+
+  const periodLabel = periodMode === "all" ? "All Time" : periodMode === "day" ? fmtDate(selDate) : periodMode === "week" ? fmtWeekLabel(selWeek) : monthLabel(selMonth);
 
   const totalKg = periodSold.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
   const totalSacks = periodSold.length;
@@ -5400,7 +5510,7 @@ function GumReport({ state, soldData }) {
           <div>
             <label className="lbl">Period</label>
             <div style={{ display: "flex", gap: 4 }}>
-              {[["all","All Time"],["month","Month"]].map(([v, l]) => (
+              {[["day","Day"],["week","Week"],["month","Month"],["all","All"]].map(([v, l]) => (
                 <button key={v} onClick={() => setPeriodMode(v)}
                   style={{ padding: "6px 12px", borderRadius: 6, border: "1.5px solid", fontSize: 12, cursor: "pointer", fontWeight: periodMode === v ? 700 : 400, background: periodMode === v ? "#1a1a1a" : "#fff", color: periodMode === v ? "#fff" : "#6a6050", borderColor: periodMode === v ? "#1a1a1a" : "#ddd8ce" }}>
                   {l}
@@ -5408,6 +5518,8 @@ function GumReport({ state, soldData }) {
               ))}
             </div>
           </div>
+          {periodMode === "day" && <div><label className="lbl">Date</label><input type="date" value={selDate} onChange={e => setSelDate(e.target.value)} style={{ minWidth: 140 }} /></div>}
+          {periodMode === "week" && <div><label className="lbl">Week</label><input type="week" value={selWeek} onChange={e => setSelWeek(e.target.value)} style={{ minWidth: 160 }} /></div>}
           {periodMode === "month" && (
             <div>
               <label className="lbl">Month</label>
@@ -5416,9 +5528,17 @@ function GumReport({ state, soldData }) {
               </select>
             </div>
           )}
+          <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{periodLabel}</div>
         </div>
       </div>
 
+      {periodSold.length === 0 && (
+        <div className="card" style={{ textAlign: "center", padding: 32 }}>
+          <span className="serif-italic" style={{ fontSize: 15, color: "#b0a898" }}>No gum sales in this period.</span>
+        </div>
+      )}
+
+      {periodSold.length > 0 && <>
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
         {[
@@ -5563,6 +5683,7 @@ function GumReport({ state, soldData }) {
           </div>
         );
       })()}
+      </>}
     </div>
   );
 }
