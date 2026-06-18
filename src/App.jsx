@@ -71,6 +71,11 @@ function paymentStatusBadge(status, dueDate) {
 const DEFAULT_GUM_SACK_WEIGHT = 25; // kg
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function fmtRate(n) { if (!n && n !== 0) return ""; const v = Number(n); return "₹" + (Number.isInteger(v) ? v.toString() : v.toFixed(2)); }
+// Landed cost = paper cost + transport + warai per kg
+function landedRate(r) { return (Number(r.costRate)||0) + (Number(r.transportRate)||0) + (Number(r.waraiRate)||0); }
+function landedCostAmt(r) { return landedRate(r) * Number(r.weight||r.sackWeight||0); }
+function reelLandedProfit(r) { return ((Number(r.soldRate)||0) - landedRate(r)) * Number(r.weight); }
+function gumLandedProfit(g) { return ((Number(g.soldRate)||0) - landedRate(g)) * Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT); }
 function getCurrentRate(customerData, customer, bf, gsm) {
   const hist = customerData?.[customer]?.rateHistory?.[`${bf}|${gsm}`];
   if (!hist || hist.length === 0) return "";
@@ -899,6 +904,8 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   const [openShip, setOpenShip] = useState(null);
   const [editShipKey, setEditShipKey] = useState(null); // shipment being rate-edited
   const [shipRates, setShipRates] = useState({});       // "bf|gsm" -> {mode,rate,slabs}
+  const [shipTransportRate, setShipTransportRate] = useState(""); // edit panel transport rate
+  const [shipWaraiRate, setShipWaraiRate] = useState(""); // edit panel warai rate
   const [editWeightKey, setEditWeightKey] = useState(null); // shipment being weight-edited
 
   useEffect(() => {
@@ -917,6 +924,8 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
   const [newReel, setNewReel] = useState({ size: "", weight: "" });
   const [saved, setSaved] = useState(false);
   const [gradeRates, setGradeRates] = useState({}); // "bf|gsm" -> { mode:"simple"|"slabs", rate:"", slabs:[{kg,rate}] }
+  const [inwardTransportRate, setInwardTransportRate] = useState(""); // ₹/kg for this shipment
+  const [inwardWaraiRate, setInwardWaraiRate] = useState(""); // ₹/kg for this shipment
   const weightInputRef = useRef(null);
   // Gum additions to inward
   const [inwardGumRows, setInwardGumRows] = useState([]); // [{id, variantId, numSacks, sackWeight, costRate}]
@@ -959,16 +968,21 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
       const costRate = gr
         ? (gr.mode === "simple" ? Number(gr.rate) || 0 : computeWeightedCostRate(gr.slabs, gradeKg))
         : 0;
-      return { ...r, id: genId(), sold: false, supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date, costRate };
+      const tRate = Number(inwardTransportRate) || 0;
+      const wRate = Number(inwardWaraiRate) || 0;
+      return { ...r, id: genId(), sold: false, supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date, costRate, transportRate: tRate, waraiRate: wRate };
     });
     // Save gum sacks
     const validGumRows = inwardGumRows.filter(g => g.variantId && g.numSacks && g.sackWeight);
+    const tRate = Number(inwardTransportRate) || 0;
+    const wRate = Number(inwardWaraiRate) || 0;
     const newGumSacks = validGumRows.flatMap(row => {
       const variant = (state.gumVariants||[]).find(v => v.id === row.variantId);
       const batchId = genId();
       return Array.from({ length: Number(row.numSacks) }, () => ({
         id: genId(), variantId: row.variantId, variantName: variant?.name || row.variantId,
         sackWeight: Number(row.sackWeight), costRate: Number(row.costRate) || 0,
+        transportRate: tRate, waraiRate: wRate,
         supplier: form.supplier, invoiceNo: form.invoiceNo, inwardDate: form.date,
         sold: false, batchId,
       }));
@@ -978,7 +992,7 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
       if (!s.gumStock) s.gumStock = [];
       s.gumStock = [...s.gumStock, ...newGumSacks];
     });
-    setSaved(true); setReels([]); setGradeRates({}); setInwardGumRows([]);
+    setSaved(true); setReels([]); setGradeRates({}); setInwardGumRows([]); setInwardTransportRate(""); setInwardWaraiRate("");
     setTimeout(() => { setSaved(false); setView("list"); }, 1800);
   };
 
@@ -1090,6 +1104,39 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
           })}
         </div>
       )}
+
+      )}
+
+      {/* ── TRANSPORT + WARAI RATES ── */}
+      <div className="card">
+        <h3 style={{ marginBottom: 12 }}>Landed Cost Additions <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>(optional — applies to whole shipment)</span></h3>
+        <div className="g3" style={{ marginBottom: 8 }}>
+          <div>
+            <label className="lbl">Transport Rate (₹/kg)</label>
+            <input type="number" step="0.01" inputMode="numeric" value={inwardTransportRate} onChange={e => setInwardTransportRate(e.target.value)} placeholder="e.g. 1.30" />
+          </div>
+          <div>
+            <label className="lbl">Warai / Labour (₹/kg)</label>
+            <input type="number" step="0.01" inputMode="numeric" value={inwardWaraiRate} onChange={e => setInwardWaraiRate(e.target.value)} placeholder="e.g. 0.50" />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+            {(inwardTransportRate || inwardWaraiRate) && reels.length > 0 && (() => {
+              const gradeKgs = {};
+              reels.forEach(r => { const k=`${r.bf}|${r.gsm}`; gradeKgs[k]=(gradeKgs[k]||0)+Number(r.weight); });
+              const sampleGradeKey = Object.keys(gradeKgs)[0];
+              const gr = sampleGradeKey ? gradeRates[sampleGradeKey] : null;
+              const paperRate = gr ? (gr.mode === "simple" ? Number(gr.rate)||0 : computeWeightedCostRate(gr.slabs, gradeKgs[sampleGradeKey])) : 0;
+              const landed = paperRate + (Number(inwardTransportRate)||0) + (Number(inwardWaraiRate)||0);
+              return paperRate > 0 ? (
+                <div style={{ fontSize: 11, background: "#f0f7ea", border: "1px solid #b5dcc0", borderRadius: 7, padding: "6px 10px", color: "#2d6a4f" }}>
+                  <span style={{ fontWeight: 600 }}>{fmtRate(landed)}/kg landed</span>
+                  <span style={{ color: "#9a9080", marginLeft: 4 }}>({fmtRate(paperRate)} paper + {fmtRate((Number(inwardTransportRate)||0)+(Number(inwardWaraiRate)||0))} charges)</span>
+                </div>
+              ) : null;
+            })()}
+          </div>
+        </div>
+      </div>
 
       {/* ── GUM SACKS SECTION IN INWARD ── */}
       <div className="card">
@@ -1366,6 +1413,9 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                               if (!grades[k2]) grades[k2] = { mode: "simple", rate: String(r.costRate || ""), slabs: [{ kg: "", rate: String(r.costRate || "") }] };
                             });
                             setShipRates(grades);
+                            // Seed transport/warai from first reel
+                            setShipTransportRate(String(sh.reels[0]?.transportRate || ""));
+                            setShipWaraiRate(String(sh.reels[0]?.waraiRate || ""));
                             setEditShipKey(key);
                             setEditWeightKey(null);
                           }}>
@@ -1422,25 +1472,37 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                               </div>
                             );
                           })}
+                          <div style={{ display: "flex", gap: 8, marginBottom: 12, marginTop: 4 }}>
+                            <div style={{ flex: 1 }}>
+                              <label className="lbl">Transport Rate (₹/kg)</label>
+                              <input type="number" step="0.01" inputMode="numeric" value={shipTransportRate} onChange={e => setShipTransportRate(e.target.value)} placeholder="e.g. 1.30" />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label className="lbl">Warai / Labour (₹/kg)</label>
+                              <input type="number" step="0.01" inputMode="numeric" value={shipWaraiRate} onChange={e => setShipWaraiRate(e.target.value)} placeholder="e.g. 0.50" />
+                            </div>
+                          </div>
                           <button className="btn btn-dark btn-sm" style={{ width: "100%", justifyContent: "center" }}
                             onClick={() => {
-                              // Assign costRate to all reels in this shipment
+                              // Assign costRate + transportRate + waraiRate to all reels in this shipment
                               const gradeKgs = {};
                               sh.reels.forEach(r => {
                                 const k2 = `${r.bf}|${r.gsm}`;
                                 if (!gradeKgs[k2]) gradeKgs[k2] = 0;
                                 gradeKgs[k2] += Number(r.weight);
                               });
+                              const tR = Number(shipTransportRate) || 0;
+                              const wR = Number(shipWaraiRate) || 0;
                               update(s => {
                                 s.stock = s.stock.map(r => {
                                   if (!sh.reels.some(x => x.id === r.id)) return r;
                                   const k2 = `${r.bf}|${r.gsm}`;
                                   const gr = shipRates[k2];
-                                  if (!gr) return r;
+                                  if (!gr) return { ...r, transportRate: tR, waraiRate: wR };
                                   const costRate = gr.mode === "simple"
                                     ? Number(gr.rate) || 0
                                     : computeWeightedCostRate(gr.slabs, gradeKgs[k2]);
-                                  return { ...r, costRate };
+                                  return { ...r, costRate, transportRate: tR, waraiRate: wR };
                                 });
                               });
                               setEditShipKey(null);
@@ -1495,7 +1557,9 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                                   <span className="serif" style={{ fontSize: 20 }}>{sz}"</span>
                                   <span className="tag" style={{ fontSize: 10 }}>{reels[0].bf} BF · {reels[0].gsm} GSM</span>
                                   <span style={{ fontSize: 11, color: "#9a9080" }}>{reels.length} reel{reels.length !== 1 ? "s" : ""}</span>
-                                  {costSet && <span style={{ fontSize: 10, color: "#2d6a4f", fontWeight: 600 }}>{fmtRate(reels[0].costRate)}/kg</span>}
+                                  {costSet && <span style={{ fontSize: 10, color: "#2d6a4f", fontWeight: 600 }}>
+                                    {fmtRate((Number(reels[0].costRate)||0)+(Number(reels[0].transportRate)||0)+(Number(reels[0].waraiRate)||0))}/kg{(reels[0].transportRate||reels[0].waraiRate) ? " landed" : ""}
+                                  </span>}
                                 </div>
                                 <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6050" }}>{fmt(Math.round(szTotal))} kg</span>
                               </div>
@@ -1515,7 +1579,25 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
                         <span style={{ color: "#9a9080" }}>{sh.reels.length} reels · {availCount} available</span>
                         <div style={{ textAlign: "right" }}>
                           <span style={{ fontWeight: 600, color: "#1a1a1a" }}>{fmt(Math.round(totalWt))} kg total</span>
-                          {(() => { const shipVal = sh.reels.reduce((s, r) => s + (Number(r.costRate)||0)*Number(r.weight), 0); return shipVal > 0 ? <span style={{ display: "block", fontSize: 12, color: "#8b6914", fontWeight: 700 }}>{fmtRs(shipVal)} cost value</span> : null; })()}
+                          {(() => { 
+                            const shipVal = sh.reels.reduce((s, r) => s + (Number(r.costRate)||0)*Number(r.weight), 0); 
+                            const shipTransport = sh.reels.reduce((s, r) => s + (Number(r.transportRate)||0)*Number(r.weight), 0);
+                            const shipWarai = sh.reels.reduce((s, r) => s + (Number(r.waraiRate)||0)*Number(r.weight), 0);
+                            const shipLanded = shipVal + shipTransport + shipWarai;
+                            if (shipVal <= 0) return null;
+                            return (
+                              <div style={{ textAlign: "right" }}>
+                                {(shipTransport > 0 || shipWarai > 0) ? (
+                                  <>
+                                    <span style={{ display: "block", fontSize: 12, color: "#8b6914", fontWeight: 700 }}>{fmtRs(shipLanded)} landed cost</span>
+                                    <span style={{ display: "block", fontSize: 10, color: "#9a9080" }}>{fmtRs(shipVal)} paper + {fmtRs(shipTransport+shipWarai)} charges</span>
+                                  </>
+                                ) : (
+                                  <span style={{ display: "block", fontSize: 12, color: "#8b6914", fontWeight: 700 }}>{fmtRs(shipVal)} cost value</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -3138,10 +3220,10 @@ function HistoryTab({ state, update }) {
     const cd = state.customerData?.[selCustomer] || {};
     const custChallans = Object.values(challanMap).filter(c => (c.customer || "") === selCustomer);
     const reelRevenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
-    const reelProfit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
+    const reelProfit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + reelLandedProfit(r), 0), 0);
     const gumRevenue = cs.gumRevenue || 0;
     const custGumSold = (state.gumStock||[]).filter(g => g.sold && g.soldTo === selCustomer);
-    const gumProfit = custGumSold.reduce((s, g) => s + ((Number(g.soldRate)||0) - (Number(g.costRate)||0)) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+    const gumProfit = custGumSold.reduce((s, g) => s + gumLandedProfit(g), 0);
     const revenue = reelRevenue + gumRevenue;
     const profit = reelProfit + gumProfit;
     return { cs, cd, revenue, profit, reelRevenue, reelProfit, gumRevenue, gumProfit, custChallans, custGumSold };
@@ -4118,7 +4200,7 @@ function ReelReport({ state, soldData }) {
     gradeMap[k].reels++;
     gradeMap[k].kg += Number(r.weight);
     gradeMap[k].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
-    gradeMap[k].cost += (Number(r.costRate) || 0) * Number(r.weight);
+    gradeMap[k].cost += landedRate(r) * Number(r.weight);
   });
   const sizeMap = {};
   periodSold.forEach(r => { sizeMap[r.size] = (sizeMap[r.size] || 0) + 1; });
@@ -4129,7 +4211,7 @@ function ReelReport({ state, soldData }) {
     if (!custMap[c]) custMap[c] = { reels: 0, kg: 0, revenue: 0, profit: 0, sizes: {} };
     custMap[c].reels++; custMap[c].kg += Number(r.weight);
     custMap[c].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
-    custMap[c].profit += ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight);
+    custMap[c].profit += reelLandedProfit(r);
     custMap[c].sizes[r.size] = (custMap[c].sizes[r.size] || 0) + 1;
   });
   const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
@@ -4163,7 +4245,7 @@ function ReelReport({ state, soldData }) {
   const gradeColTotals = {}; crossGradeLabels.forEach(gk => { gradeColTotals[gk] = { reels: 0, kg: 0 }; allSoldSizes.forEach(sz => { gradeColTotals[gk].reels += crossTab[sz]?.[gk]?.reels || 0; gradeColTotals[gk].kg += crossTab[sz]?.[gk]?.kg || 0; }); });
 
   const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
-  const totalCost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+  const totalCost = periodSold.reduce((s, r) => s + landedRate(r) * Number(r.weight), 0);
   const totalProfit = totalRevenue - totalCost;
   const avgRatePerKg = totalKg > 0 ? totalRevenue / totalKg : 0;
   const topGrade = Object.entries(gradeMap).sort((a, b) => b[1].kg - a[1].kg)[0];
@@ -4224,6 +4306,37 @@ function ReelReport({ state, soldData }) {
           <BarChart data={trendData} color="#8b6914" />
         </div>
       )}
+      {/* Landed cost breakdown */}
+      {periodSold.some(r => r.transportRate || r.waraiRate) && (() => {
+        const paperCost = periodSold.reduce((s, r) => s + (Number(r.costRate)||0)*Number(r.weight), 0);
+        const transportCost = periodSold.reduce((s, r) => s + (Number(r.transportRate)||0)*Number(r.weight), 0);
+        const waraiCost = periodSold.reduce((s, r) => s + (Number(r.waraiRate)||0)*Number(r.weight), 0);
+        const total = paperCost + transportCost + waraiCost;
+        if (total <= 0) return null;
+        return (
+          <div className="card">
+            <h3>Cost Breakdown (Landed)</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { label: "Paper Cost", val: paperCost, pct: total > 0 ? (paperCost/total*100).toFixed(1) : 0, color: "#8b6914" },
+                { label: "Transport", val: transportCost, pct: total > 0 ? (transportCost/total*100).toFixed(1) : 0, color: "#2a5a8a" },
+                { label: "Warai / Labour", val: waraiCost, pct: total > 0 ? (waraiCost/total*100).toFixed(1) : 0, color: "#6a3a8a" },
+              ].filter(x => x.val > 0).map(x => (
+                <div key={x.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: x.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "#6a6050", flex: 1 }}>{x.label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>{fmtRs(x.val)}</span>
+                  <span style={{ fontSize: 11, color: "#9a9080", minWidth: 40, textAlign: "right" }}>{x.pct}%</span>
+                </div>
+              ))}
+              <div style={{ borderTop: "1px solid #e8e2d8", paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#6a6050" }}>Total Landed Cost</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#8b6914" }}>{fmtRs(total)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {/* Grade breakdown */}
       {Object.keys(gradeMap).length > 0 && (
         <div className="card">
@@ -4352,7 +4465,7 @@ function LinerReport({ state, soldData }) {
 
   const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
   const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
-  const totalCost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+  const totalCost = periodSold.reduce((s, r) => s + landedRate(r) * Number(r.weight), 0);
   const totalProfit = totalRevenue - totalCost;
   const totalLabour = periodSold.reduce((s, r) => s + (Number(r.labourRate) || 0) * Number(r.weight), 0);
 
@@ -4363,7 +4476,7 @@ function LinerReport({ state, soldData }) {
     if (!specMap[k]) specMap[k] = { bf: r.bf, gsm: r.gsm, size: r.size, liners: 0, kg: 0, revenue: 0, cost: 0 };
     specMap[k].liners++; specMap[k].kg += Number(r.weight);
     specMap[k].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
-    specMap[k].cost += (Number(r.costRate) || 0) * Number(r.weight);
+    specMap[k].cost += landedRate(r) * Number(r.weight);
   });
 
   // By customer
@@ -4373,7 +4486,7 @@ function LinerReport({ state, soldData }) {
     if (!custMap[c]) custMap[c] = { liners: 0, kg: 0, revenue: 0, profit: 0 };
     custMap[c].liners++; custMap[c].kg += Number(r.weight);
     custMap[c].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
-    custMap[c].profit += ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight);
+    custMap[c].profit += reelLandedProfit(r);
   });
   const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
 
@@ -4538,13 +4651,13 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold }) {
     count: arr.length,
     kg: arr.reduce((s, r) => s + Number(r.weight), 0),
     revenue: arr.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0),
-    cost: arr.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0),
+    cost: arr.reduce((s, r) => s + landedRate(r) * Number(r.weight), 0),
   });
   const calcGum = arr => ({
     count: arr.length,
     kg: arr.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
     revenue: arr.reduce((s, g) => s + (Number(g.soldRate) || 0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
-    cost: arr.reduce((s, g) => s + (Number(g.costRate) || 0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
+    cost: arr.reduce((s, g) => s + landedRate(g) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0),
   });
   const R = calc(periodReels);
   const L = calc(periodLiners);
@@ -4940,7 +5053,7 @@ function _OldReportsTabBody({ state }) {
     gradeMap[k].reels++;
     gradeMap[k].kg += Number(r.weight);
     gradeMap[k].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
-    gradeMap[k].cost += (Number(r.costRate) || 0) * Number(r.weight);
+    gradeMap[k].cost += landedRate(r) * Number(r.weight);
   });
 
   const sizeMap = {};
@@ -4952,7 +5065,7 @@ function _OldReportsTabBody({ state }) {
     if (!custMap[c]) custMap[c] = { reels: 0, kg: 0, revenue: 0, profit: 0, sizes: {}, grades: {} };
     custMap[c].reels++; custMap[c].kg += Number(r.weight);
     custMap[c].revenue += (Number(r.soldRate) || 0) * Number(r.weight);
-    custMap[c].profit += ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight);
+    custMap[c].profit += reelLandedProfit(r);
     custMap[c].sizes[r.size] = (custMap[c].sizes[r.size] || 0) + 1;
     custMap[c].grades[`${r.bf} BF ${r.gsm} GSM`] = (custMap[c].grades[`${r.bf} BF ${r.gsm} GSM`] || 0) + 1;
   });
@@ -5094,7 +5207,7 @@ function _OldReportsTabBody({ state }) {
       <div className="g4">
         {(() => {
           const revenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
-          const cost = periodSold.reduce((s, r) => s + (Number(r.costRate) || 0) * Number(r.weight), 0);
+          const cost = periodSold.reduce((s, r) => s + landedRate(r) * Number(r.weight), 0);
           const profit = revenue - cost;
           return [
             { label: "Reels Sold", val: totalReels, unit: "reels" },
@@ -5121,7 +5234,7 @@ function _OldReportsTabBody({ state }) {
           </div>
           {(() => {
             const revData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0) }));
-            const profData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + ((Number(r.soldRate)||0)-(Number(r.costRate)||0))*Number(r.weight), 0) }));
+            const profData = last6.map(m => ({ label: monthLabel(m).split(" ")[0], value: sold.filter(r => monthKey(r.soldDate) === m).reduce((s, r) => s + reelLandedProfit(r), 0) }));
             const hasRevData = revData.some(d => d.value > 0);
             const hasProfData = profData.some(d => d.value !== 0);
             return (
@@ -5431,8 +5544,10 @@ function _OldReportsTabBody({ state }) {
 function GumStockTab({ state, update, isEmployee }) {
   const [view, setView] = useState("list"); // "list" | "inward" | "history"
   const [saved, setSaved] = useState(false);
-  const [form, setForm] = useState({ supplier: "", invoiceNo: "", date: "", variantId: "", sackWeight: "", numSacks: "", costRate: "" });
+  const [form, setForm] = useState({ supplier: "", invoiceNo: "", date: "", variantId: "", sackWeight: "", numSacks: "", costRate: "", transportRate: "", waraiRate: "" });
   const [openBatch, setOpenBatch] = useState(null);
+  const [gumBatchEditId, setGumBatchEditId] = useState(null);
+  const [gumBatchEditRates, setGumBatchEditRates] = useState({ costRate: "", transportRate: "", waraiRate: "" });
 
   useEffect(() => {
     setForm(f => ({ ...f, date: today(), variantId: (state.gumVariants||[])[0]?.id || "" }));
@@ -5444,17 +5559,19 @@ function GumStockTab({ state, update, isEmployee }) {
 
   const saveInward = () => {
     const n = Number(form.numSacks); const sw = Number(form.sackWeight); const cr = Number(form.costRate) || 0;
+    const tR = Number(form.transportRate) || 0; const wR = Number(form.waraiRate) || 0;
     if (!form.supplier || !form.variantId || !n || !sw) return;
     const variant = variants.find(v => v.id === form.variantId);
     const batchId = genId();
     const newSacks = Array.from({ length: n }, () => ({
       id: genId(), variantId: form.variantId, variantName: variant?.name || form.variantId,
-      sackWeight: sw, costRate: cr, supplier: form.supplier, invoiceNo: form.invoiceNo,
+      sackWeight: sw, costRate: cr, transportRate: tR, waraiRate: wR,
+      supplier: form.supplier, invoiceNo: form.invoiceNo,
       inwardDate: form.date, sold: false, batchId,
     }));
     update(s => { if (!s.gumStock) s.gumStock = []; s.gumStock = [...s.gumStock, ...newSacks]; });
     setSaved(true);
-    setForm(f => ({ ...f, supplier: "", invoiceNo: "", numSacks: "", sackWeight: "", costRate: "" }));
+    setForm(f => ({ ...f, supplier: "", invoiceNo: "", numSacks: "", sackWeight: "", costRate: "", transportRate: "", waraiRate: "" }));
     setTimeout(() => { setSaved(false); setView("list"); }, 1800);
   };
 
@@ -5496,10 +5613,28 @@ function GumStockTab({ state, update, isEmployee }) {
           <label className="lbl">Cost Rate (₹/kg)</label>
           <input type="number" step="0.01" inputMode="numeric" value={form.costRate} onChange={e => setForm(f => ({...f, costRate: e.target.value}))} placeholder="e.g. 18" />
         </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label className="lbl">Transport Rate (₹/kg)</label>
+            <input type="number" step="0.01" inputMode="numeric" value={form.transportRate} onChange={e => setForm(f => ({...f, transportRate: e.target.value}))} placeholder="e.g. 1.30" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="lbl">Warai / Labour (₹/kg)</label>
+            <input type="number" step="0.01" inputMode="numeric" value={form.waraiRate} onChange={e => setForm(f => ({...f, waraiRate: e.target.value}))} placeholder="e.g. 0.50" />
+          </div>
+        </div>
         {form.numSacks && form.sackWeight && (
           <div style={{ marginTop: 14, padding: "10px 14px", background: "#f5f0e8", borderRadius: 8, fontSize: 13 }}>
             <strong>{form.numSacks} sacks × {form.sackWeight} kg = {fmt(Number(form.numSacks) * Number(form.sackWeight))} kg total</strong>
-            {form.costRate && <span style={{ color: "#8b6914", marginLeft: 10 }}>· {fmtRs(Number(form.numSacks) * Number(form.sackWeight) * Number(form.costRate))} cost value</span>}
+            {form.costRate && (() => {
+              const totalKg = Number(form.numSacks) * Number(form.sackWeight);
+              const paperCost = totalKg * Number(form.costRate);
+              const charges = totalKg * ((Number(form.transportRate)||0) + (Number(form.waraiRate)||0));
+              const landed = paperCost + charges;
+              return charges > 0
+                ? <><span style={{ color: "#8b6914", marginLeft: 10 }}>· {fmtRs(landed)} landed cost</span><span style={{ color: "#9a9080", marginLeft: 6, fontSize: 12 }}>({fmtRs(paperCost)} paper + {fmtRs(charges)} charges)</span></>
+                : <span style={{ color: "#8b6914", marginLeft: 10 }}>· {fmtRs(paperCost)} cost value</span>;
+            })()}
           </div>
         )}
         <button className="btn btn-dark" style={{ marginTop: 14 }} onClick={saveInward}
@@ -5542,7 +5677,15 @@ function GumStockTab({ state, update, isEmployee }) {
                     </div>
                     <div style={{ fontSize: 11, color: "#9a9080" }}>
                       {fmtDate(b.date)} · {b.supplier}{b.invoiceNo ? ` · ${b.invoiceNo}` : ""} · {fmt(totalKg)} kg · {b.sackWeight} kg/sack
-                      {b.costRate > 0 && <span style={{ color: "#8b6914", marginLeft: 6 }}>· {fmtRate(b.costRate)}/kg</span>}
+                      {b.costRate > 0 && (() => {
+                        const sampleSack = b.sacks[0];
+                        const tR = Number(sampleSack?.transportRate)||0;
+                        const wR = Number(sampleSack?.waraiRate)||0;
+                        const totalRate = Number(b.costRate) + tR + wR;
+                        return (tR > 0 || wR > 0)
+                          ? <span style={{ color: "#8b6914", marginLeft: 6 }}>· {fmtRate(totalRate)}/kg landed</span>
+                          : <span style={{ color: "#8b6914", marginLeft: 6 }}>· {fmtRate(b.costRate)}/kg</span>;
+                      })()}
                     </div>
                   </div>
                   <div style={{ color: "#c8b89a", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
@@ -5558,8 +5701,62 @@ function GumStockTab({ state, update, isEmployee }) {
                     </div>
                     <div style={{ marginTop: 10, fontSize: 12, color: "#6a6050" }}>
                       {b.sacks.length} sacks · {availCount} available · {fmt(totalKg)} kg total
-                      {b.costRate > 0 && <span style={{ color: "#8b6914", marginLeft: 6, fontWeight: 600 }}>· {fmtRs(totalKg * Number(b.costRate))} cost value</span>}
+                      {b.costRate > 0 && (() => {
+                        const sampleSack = b.sacks[0];
+                        const tR = Number(sampleSack?.transportRate)||0;
+                        const wR = Number(sampleSack?.waraiRate)||0;
+                        const landed = (Number(b.costRate)+tR+wR)*totalKg;
+                        return (tR > 0 || wR > 0)
+                          ? <><span style={{ color: "#8b6914", marginLeft: 6, fontWeight: 600 }}>· {fmtRs(landed)} landed</span><span style={{ color: "#9a9080", marginLeft: 4 }}>({fmtRate(Number(b.costRate)+tR+wR)}/kg)</span></>
+                          : <span style={{ color: "#8b6914", marginLeft: 6, fontWeight: 600 }}>· {fmtRs(totalKg * Number(b.costRate))} cost value</span>;
+                      })()}
                     </div>
+                    {/* Edit transport/warai for this batch */}
+                    {!isEmployee && (
+                      <div style={{ marginTop: 10 }}>
+                        {gumBatchEditId === b.id ? (
+                          <div style={{ background: "#fff", border: "1.5px solid #8b6914", borderRadius: 8, padding: "12px 14px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#8b6914", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Rates</div>
+                            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                              <div style={{ flex: 1 }}>
+                                <label className="lbl">Cost Rate (₹/kg)</label>
+                                <input type="number" step="0.01" inputMode="numeric" value={gumBatchEditRates.costRate} onChange={e => setGumBatchEditRates(r => ({...r, costRate: e.target.value}))} placeholder="₹/kg" />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <label className="lbl">Transport (₹/kg)</label>
+                                <input type="number" step="0.01" inputMode="numeric" value={gumBatchEditRates.transportRate} onChange={e => setGumBatchEditRates(r => ({...r, transportRate: e.target.value}))} placeholder="₹/kg" />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <label className="lbl">Warai (₹/kg)</label>
+                                <input type="number" step="0.01" inputMode="numeric" value={gumBatchEditRates.waraiRate} onChange={e => setGumBatchEditRates(r => ({...r, waraiRate: e.target.value}))} placeholder="₹/kg" />
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button className="btn btn-dark btn-sm" style={{ flex: 1, justifyContent: "center" }}
+                                onClick={() => {
+                                  const cr = Number(gumBatchEditRates.costRate) || 0;
+                                  const tR = Number(gumBatchEditRates.transportRate) || 0;
+                                  const wR = Number(gumBatchEditRates.waraiRate) || 0;
+                                  update(s => {
+                                    s.gumStock = (s.gumStock || []).map(g =>
+                                      b.sacks.some(x => x.id === g.id) ? { ...g, costRate: cr, transportRate: tR, waraiRate: wR } : g
+                                    );
+                                  });
+                                  setGumBatchEditId(null);
+                                }}>✓ Save</button>
+                              <button className="btn btn-outline btn-sm" onClick={() => setGumBatchEditId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="btn btn-outline btn-sm"
+                            onClick={() => {
+                              const sampleSack = b.sacks[0];
+                              setGumBatchEditRates({ costRate: String(b.costRate||""), transportRate: String(sampleSack?.transportRate||""), waraiRate: String(sampleSack?.waraiRate||"") });
+                              setGumBatchEditId(b.id);
+                            }}>₹ Edit Rates</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -5862,7 +6059,7 @@ function GumReport({ state, soldData }) {
   const totalKg = periodSold.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
   const totalSacks = periodSold.length;
   const totalRevenue = periodSold.reduce((s, g) => s + (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
-  const totalCost = periodSold.reduce((s, g) => s + (Number(g.costRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const totalCost = periodSold.reduce((s, g) => s + landedRate(g) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
   const totalProfit = totalRevenue - totalCost;
 
   // By variant
@@ -5874,7 +6071,7 @@ function GumReport({ state, soldData }) {
     variantMap[k].sacks++;
     variantMap[k].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
     variantMap[k].revenue += (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
-    variantMap[k].cost += (Number(g.costRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    variantMap[k].cost += landedRate(g) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
   });
 
   // By customer
@@ -5884,7 +6081,7 @@ function GumReport({ state, soldData }) {
     if (!custMap[c]) custMap[c] = { sacks: 0, kg: 0, revenue: 0, profit: 0 };
     custMap[c].sacks++; custMap[c].kg += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
     custMap[c].revenue += (Number(g.soldRate)||0) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
-    custMap[c].profit += ((Number(g.soldRate)||0) - (Number(g.costRate)||0)) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    custMap[c].profit += gumLandedProfit(g);
   });
   const top5Cust = Object.entries(custMap).sort((a, b) => b[1].kg - a[1].kg).slice(0, 5);
 
