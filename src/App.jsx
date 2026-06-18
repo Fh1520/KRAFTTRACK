@@ -39,7 +39,33 @@ const LINER_GSM_OPTIONS = ["80", "90", "100", "110", "120", "130", "140", "150",
 const PRIORITY_GRADES = [{ bf: "18", gsm: "150" }, { bf: "22", gsm: "180" }];
 const isPriority = (bf, gsm) => PRIORITY_GRADES.some(p => p.bf === bf && p.gsm === gsm);
 
-const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [], gumVariants: [{ id: "gum_a", name: "Variant A", color: "#e8a020" }, { id: "gum_b", name: "Variant B", color: "#6a8a3a" }], gumStock: [] };
+const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [], gumVariants: [{ id: "gum_a", name: "Variant A", color: "#e8a020" }, { id: "gum_b", name: "Variant B", color: "#6a8a3a" }], gumStock: [], payments: [] };
+
+// ─── PAYMENT HELPERS ──────────────────────────────────────────────────────────
+const CREDIT_PRESETS = [7, 15, 30, 45, 60, 90];
+function addDays(dateStr, days) { if (!dateStr || !days) return null; const d = new Date(dateStr); d.setDate(d.getDate() + Number(days)); return d.toISOString().slice(0,10); }
+function daysDiff(dateStr) { if (!dateStr) return null; return Math.floor((new Date(dateStr) - new Date(today())) / 86400000); }
+function daysDiff2(dateA, dateB) { if (!dateA || !dateB) return null; return Math.floor((new Date(dateA) - new Date(dateB)) / 86400000); }
+function challanValue(ch) { const rv=(ch.reels||[]).reduce((s,r)=>s+(Number(r.soldRate)||0)*Number(r.weight),0); const gv=(ch.gumSacks||[]).reduce((s,g)=>s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0); return rv+gv; }
+function makeChallanKey(ch) { return ch.challanNo || `__${ch.date}__${ch.customer}`; }
+function buildPaymentEntry(ch, creditDays) { return { id: genId(), challanNo: ch.challanNo||null, challanKey: makeChallanKey(ch), customer: ch.customer||"", challanDate: ch.date, amount: challanValue(ch), creditDays: creditDays||null, dueDate: creditDays ? addDays(ch.date, creditDays) : null, paid: false, paidDate: null, partialAmount: null, note: "" }; }
+function getPaymentStatus(p) {
+  if (!p) return "untracked";
+  if (p.paid) return "paid";
+  if (!p.dueDate) return "untracked";
+  const diff = daysDiff(p.dueDate);
+  if (diff < 0) return "overdue";
+  if (diff <= 7) return "due-soon";
+  return "upcoming";
+}
+function paymentStatusBadge(status, dueDate) {
+  if (status === "paid") return { label: "✓ Paid", bg: "#edf7f0", border: "#b5dcc0", color: "#2d6a4f" };
+  if (status === "overdue") { const d = Math.abs(daysDiff(dueDate)); return { label: `Overdue ${d}d`, bg: "#fef0ee", border: "#f0c0ba", color: "#b83020" }; }
+  if (status === "due-soon") { const d = daysDiff(dueDate); return { label: d === 0 ? "Due today" : `Due in ${d}d`, bg: "#fef5e8", border: "#f0d5a0", color: "#a05800" }; }
+  if (status === "upcoming") { const d = daysDiff(dueDate); return { label: `Due in ${d}d`, bg: "#f4f8ff", border: "#c8b89a", color: "#2d2d2d" }; }
+  return { label: "Not tracked", bg: "#f5f0e8", border: "#e5dece", color: "#9a9080" };
+}
+
 
 // GUM helpers
 const DEFAULT_GUM_SACK_WEIGHT = 25; // kg
@@ -253,7 +279,7 @@ export default function App() {
             cloudSave(data);
           }
         }
-        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [], gumVariants: data.gumVariants || INITIAL_STATE.gumVariants, gumStock: data.gumStock || [] });
+        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [], gumVariants: data.gumVariants || INITIAL_STATE.gumVariants, gumStock: data.gumStock || [], payments: data.payments || [] });
       }
       setSyncing(false);
     }, (error) => {
@@ -1642,27 +1668,14 @@ function SellTab({ state, update }) {
   const [date, setDate] = useState(today());
   const [transportBy, setTransportBy] = useState("");
 
-  const { lastChallanNo, suggestedChallan, existingChallans } = (() => {
-    const allSoldItems = [
-      ...state.stock.filter(r => r.sold && r.soldChallanNo),
-      ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo),
-    ];
-    const existing = new Set(allSoldItems.map(r => String(r.soldChallanNo).trim()));
-    const lastEntry = allSoldItems.sort((a, b) => new Date(b.soldDate||0) - new Date(a.soldDate||0))[0];
-    const last = lastEntry?.soldChallanNo || "";
-    let suggested = "";
-    if (last) {
-      const m = last.match(/^(.*?)(\d+)$/);
-      if (m) {
-        const prefix = m[1];
-        let maxNum = 0;
-        existing.forEach(ch => { const mm = ch.match(/^(.*?)(\d+)$/); if (mm && mm[1] === prefix) maxNum = Math.max(maxNum, parseInt(mm[2], 10)); });
-        suggested = prefix + (maxNum + 1);
-      }
-    }
-    return { lastChallanNo: last, suggestedChallan: suggested, existingChallans: existing };
+  const suggestedChallan = (() => {
+    const last = state.stock
+      .filter(r => r.sold && r.soldChallanNo && r.soldDate)
+      .sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate))[0]?.soldChallanNo || "";
+    if (!last) return "";
+    const m = last.match(/^(.*?)(\d+)$/);
+    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
   })();
-
   const [challanNo, setChallanNo] = useState(suggestedChallan);
   const [selected, setSelected] = useState([]);
   const [selectedGumIds, setSelectedGumIds] = useState([]);
@@ -1670,6 +1683,8 @@ function SellTab({ state, update }) {
   const [filter, setFilter] = useState({ bf: "", gsm: "", size: "" });
   const [done, setDone] = useState(null);
   const [sellRates, setSellRates] = useState({}); // "bf|gsm" -> rate string
+
+  // Auto-load rates from customerData when customer changes
   useEffect(() => {
     if (!customer || !state.customerData?.[customer]) { setSellRates({}); return; }
     const hist = state.customerData[customer]?.rateHistory || {};
@@ -1733,6 +1748,18 @@ function SellTab({ state, update }) {
           s.customerData[customer].rateHistory[k] = [...hist, { rate: Number(rate), from: date }];
         }
       });
+      // Auto-create payment entry if customer has creditDays set
+      const creditDays = s.customerData[customer]?.creditDays || null;
+      if (creditDays && challanNo) {
+        if (!s.payments) s.payments = [];
+        const alreadyExists = s.payments.some(p => p.challanKey === (challanNo || `__${date}__${customer}`));
+        if (!alreadyExists) {
+          const reelList = s.stock.filter(r => selected.includes(r.id));
+          const gumList = (s.gumStock||[]).filter(g => selectedGumIds.includes(g.id));
+          const chObj = { challanNo, date, customer, reels: reelList, gumSacks: gumList };
+          s.payments = [...s.payments, buildPaymentEntry(chObj, creditDays)];
+        }
+      }
     });
     setDone({ count: ct, wt, customer, val: val + gumVal, gumCount: selectedGumIds.length, gumKg, gumVal });
   };
@@ -1771,16 +1798,8 @@ function SellTab({ state, update }) {
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers || []} /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div>
-            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · suggested</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313"
-              style={{ borderColor: challanNo && existingChallans.has(String(challanNo).trim()) ? "#b83020" : undefined }} />
-            <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-              {lastChallanNo && <span style={{ fontSize: 10, color: "#9a9080" }}>Last: <strong>{lastChallanNo}</strong></span>}
-              {suggestedChallan && <span style={{ fontSize: 10, color: "#8b6914", cursor: "pointer", textDecoration: "underline" }} onClick={() => setChallanNo(suggestedChallan)}>Use {suggestedChallan}</span>}
-            </div>
-            {challanNo && existingChallans.has(String(challanNo).trim()) && (
-              <div style={{ fontSize: 11, color: "#b83020", marginTop: 4, fontWeight: 600 }}>⚠ Challan {challanNo} already exists!</div>
-            )}
+            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313" />
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
@@ -1789,6 +1808,7 @@ function SellTab({ state, update }) {
         </div>
       </div>
 
+      {/* Sell rates per grade */}
       {customer && (
         <div className="card">
           <h3>Selling Rates — ₹/kg {!selGrades.length && <span style={{ fontWeight: 400, color: "#9a9080", fontSize: 11 }}>(select reels to see grades)</span>}</h3>
@@ -2442,21 +2462,14 @@ function LinerSellTab({ state, update }) {
   const [done, setDone] = useState(null);
   const [transportBy, setTransportBy] = useState("");
 
-  // Shared challan sequence across reels + liner + gum
-  const { lastChallanNo: linerLastChallan, suggestedChallan, existingChallans: linerExistingChallans } = (() => {
-    const allSoldItems = [...state.stock.filter(r => r.sold && r.soldChallanNo), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo)];
-    const existing = new Set(allSoldItems.map(r => String(r.soldChallanNo).trim()));
-    const last = allSoldItems.sort((a, b) => new Date(b.soldDate||0) - new Date(a.soldDate||0))[0]?.soldChallanNo || "";
-    let suggested = "";
-    if (last) {
-      const m = last.match(/^(.*?)(\d+)$/);
-      if (m) {
-        const prefix = m[1]; let maxNum = 0;
-        existing.forEach(ch => { const mm = ch.match(/^(.*?)(\d+)$/); if (mm && mm[1] === prefix) maxNum = Math.max(maxNum, parseInt(mm[2], 10)); });
-        suggested = prefix + (maxNum + 1);
-      }
-    }
-    return { lastChallanNo: last, suggestedChallan: suggested, existingChallans: existing };
+  // Shared challan sequence across reels + liner
+  const suggestedChallan = (() => {
+    const last = state.stock
+      .filter(r => r.sold && r.soldChallanNo && r.soldDate)
+      .sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate))[0]?.soldChallanNo || "";
+    if (!last) return "";
+    const m = last.match(/^(.*?)(\d+)$/);
+    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
   })();
   const [challanNo, setChallanNo] = useState(suggestedChallan);
 
@@ -2493,6 +2506,17 @@ function LinerSellTab({ state, update }) {
       if (transportBy.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===transportBy.trim().toLowerCase())) {
         s.transporters = [...(s.transporters || []), transportBy.trim()].sort();
       }
+      // Auto-create payment entry
+      const creditDays = s.customerData?.[customer]?.creditDays || null;
+      if (creditDays && challanNo) {
+        if (!s.payments) s.payments = [];
+        const challanKey = challanNo || `__${date}__${customer}`;
+        if (!s.payments.some(p => p.challanKey === challanKey)) {
+          const linerList = s.stock.filter(r => selected.includes(r.id));
+          const chObj = { challanNo, date, customer, reels: linerList, gumSacks: [] };
+          s.payments = [...s.payments, buildPaymentEntry(chObj, creditDays)];
+        }
+      }
     });
     setDone({ count: selected.length, wt: effectiveWt, customer, val: effectiveValue });
   };
@@ -2520,15 +2544,7 @@ function LinerSellTab({ state, update }) {
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div>
             <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 314"
-              style={{ borderColor: challanNo && linerExistingChallans.has(String(challanNo).trim()) ? "#b83020" : undefined }} />
-            <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-              {linerLastChallan && <span style={{ fontSize: 10, color: "#9a9080" }}>Last: <strong>{linerLastChallan}</strong></span>}
-              {suggestedChallan && <span style={{ fontSize: 10, color: "#8b6914", cursor: "pointer", textDecoration: "underline" }} onClick={() => setChallanNo(suggestedChallan)}>Use {suggestedChallan}</span>}
-            </div>
-            {challanNo && linerExistingChallans.has(String(challanNo).trim()) && (
-              <div style={{ fontSize: 11, color: "#b83020", marginTop: 4, fontWeight: 600 }}>⚠ Challan {challanNo} already exists!</div>
-            )}
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 314" />
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
@@ -2717,6 +2733,14 @@ function HistoryTab({ state, update }) {
   const [bulkDone, setBulkDone] = useState(false);
   const [selTransporter, setSelTransporter] = useState("");
   const [transporterMonth, setTransporterMonth] = useState("");
+  const [overduesDismissed, setOverduesDismissed] = useState(false);
+
+  const payments = state.payments || [];
+  const overduePayments = payments.filter(p => !p.paid && p.dueDate && daysDiff(p.dueDate) < 0);
+  const dueSoonPayments = payments.filter(p => !p.paid && p.dueDate && daysDiff(p.dueDate) >= 0 && daysDiff(p.dueDate) <= 7);
+  const hasOverdues = overduePayments.length > 0;
+  const overdueAmount = overduePayments.reduce((s, p) => s + (p.amount||0), 0);
+  const outstandingAmount = payments.filter(p => !p.paid && p.dueDate).reduce((s, p) => s + (p.amount||0), 0);
 
   const sold = state.stock.filter(r => r.sold);
   const challanMap = {};
@@ -2754,15 +2778,12 @@ function HistoryTab({ state, update }) {
   const custStats = {};
   Object.values(challanMap).forEach(ch => {
     const c = ch.customer || "Unknown";
-    if (!custStats[c]) custStats[c] = { reels: 0, liners: 0, kg: 0, challans: 0, lastDate: "", sizes: {}, gumSacks: 0, gumKg: 0, gumRevenue: 0 };
+    if (!custStats[c]) custStats[c] = { reels: 0, kg: 0, challans: 0, lastDate: "", sizes: {}, gumSacks: 0, gumKg: 0, gumRevenue: 0 };
     custStats[c].challans++;
-    const reelsOnly = ch.reels.filter(r => r.productType !== "liner");
-    const linersOnly = ch.reels.filter(r => r.productType === "liner");
-    custStats[c].reels += reelsOnly.length;
-    custStats[c].liners += linersOnly.length;
+    custStats[c].reels += ch.reels.length;
     custStats[c].kg += ch.reels.reduce((s, r) => s + Number(r.weight), 0);
     if (!custStats[c].lastDate || ch.date > custStats[c].lastDate) custStats[c].lastDate = ch.date;
-    reelsOnly.forEach(r => { custStats[c].sizes[r.size] = (custStats[c].sizes[r.size] || 0) + 1; });
+    ch.reels.forEach(r => { custStats[c].sizes[r.size] = (custStats[c].sizes[r.size] || 0) + 1; });
   });
   // Merge gum data into customer stats
   Object.values(gumChallanMap).forEach(ch => {
@@ -3036,6 +3057,22 @@ function HistoryTab({ state, update }) {
         <button className="btn btn-outline btn-sm" onClick={() => setCustView("challans")}>← Back</button>
         <div><div className="section-eyebrow">Customers</div><h2>Customer History</h2></div>
       </div>
+      {/* Outstanding summary */}
+      {payments.filter(p => !p.paid && p.dueDate).length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          {[
+            { label: "Overdue", val: overduePayments.length, amount: overdueAmount, color: "#b83020", bg: "#fef0ee", border: "#f0c0ba" },
+            { label: "Due ≤7d", val: dueSoonPayments.length, amount: dueSoonPayments.reduce((s,p)=>s+(p.amount||0),0), color: "#a05800", bg: "#fef5e8", border: "#f0d5a0" },
+            { label: "Outstanding", val: payments.filter(p=>!p.paid&&p.dueDate).length, amount: outstandingAmount, color: "#2d2d2d", bg: "#f5f0e8", border: "#e5dece" },
+          ].map(s => (
+            <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: 10, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display',serif" }}>{s.val}</div>
+              {s.amount > 0 && <div style={{ fontSize: 10, color: s.color, marginTop: 2 }}>{fmtRs(s.amount)}</div>}
+            </div>
+          ))}
+        </div>
+      )}
       <input
         value={custSearch}
         onChange={e => setCustSearch(e.target.value)}
@@ -3066,10 +3103,17 @@ function HistoryTab({ state, update }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
                     <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>
-                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels{cs.liners > 0 ? ` · ${cs.liners} liners` : ""} · {fmt(Math.round(cs.kg))} kg{cs.gumSacks > 0 ? ` · ${cs.gumSacks} gum sack${cs.gumSacks !== 1 ? "s" : ""}` : ""}{topSz ? ` · Top: ${topSz[0]}"` : ""}
+                      {cs.challans} challan{cs.challans !== 1 ? "s" : ""} · {cs.reels} reels · {fmt(Math.round(cs.kg))} kg{cs.gumSacks > 0 ? ` · ${cs.gumSacks} gum sack${cs.gumSacks !== 1 ? "s" : ""}` : ""}{topSz ? ` · Top: ${topSz[0]}"` : ""}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    {(() => {
+                      const custOverdue = payments.filter(p => !p.paid && p.dueDate && p.customer === name && daysDiff(p.dueDate) < 0);
+                      const custOutstanding = payments.filter(p => !p.paid && p.dueDate && p.customer === name);
+                      if (custOverdue.length > 0) return <div style={{ fontSize: 11, color: "#b83020", fontWeight: 700, marginBottom: 2 }}>🔴 {custOverdue.length} overdue</div>;
+                      if (custOutstanding.length > 0) return <div style={{ fontSize: 11, color: "#a05800", fontWeight: 600, marginBottom: 2 }}>🟡 {custOutstanding.length} due</div>;
+                      return null;
+                    })()}
                     <div style={{ fontSize: 12, color: "#6a6050", fontWeight: 500 }}>{(cs.kg / 1000).toFixed(2)} t</div>
                     <div style={{ fontSize: 10, color: "#b0a898", marginTop: 2 }}>Last: {fmtDate(cs.lastDate)}</div>
                   </div>
@@ -3093,21 +3137,14 @@ function HistoryTab({ state, update }) {
     const cs = custStats[selCustomer] || {};
     const cd = state.customerData?.[selCustomer] || {};
     const custChallans = Object.values(challanMap).filter(c => (c.customer || "") === selCustomer);
-    // Separate reels (non-liner) from liners
-    const custReelsSold = state.stock.filter(r => r.sold && r.soldTo === selCustomer && r.productType !== "liner");
-    const custLinersSold = state.stock.filter(r => r.sold && r.soldTo === selCustomer && r.productType === "liner");
-    const reelRevenue = custReelsSold.reduce((s, r) => s + (Number(r.soldRate)||0) * Number(r.weight), 0);
-    const reelProfit = custReelsSold.reduce((s, r) => s + ((Number(r.soldRate)||0) - (Number(r.costRate)||0)) * Number(r.weight), 0);
-    const reelKg = custReelsSold.reduce((s, r) => s + Number(r.weight), 0);
-    const linerRevenue = custLinersSold.reduce((s, r) => s + (Number(r.soldRate)||0) * Number(r.weight), 0);
-    const linerProfit = custLinersSold.reduce((s, r) => s + ((Number(r.soldRate)||0) - (Number(r.costRate)||0)) * Number(r.weight), 0);
-    const linerKg = custLinersSold.reduce((s, r) => s + Number(r.weight), 0);
+    const reelRevenue = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + (Number(r.soldRate) || 0) * Number(r.weight), 0), 0);
+    const reelProfit = custChallans.reduce((s, ch) => s + ch.reels.reduce((ss, r) => ss + ((Number(r.soldRate) || 0) - (Number(r.costRate) || 0)) * Number(r.weight), 0), 0);
     const gumRevenue = cs.gumRevenue || 0;
     const custGumSold = (state.gumStock||[]).filter(g => g.sold && g.soldTo === selCustomer);
     const gumProfit = custGumSold.reduce((s, g) => s + ((Number(g.soldRate)||0) - (Number(g.costRate)||0)) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
-    const revenue = reelRevenue + linerRevenue + gumRevenue;
-    const profit = reelProfit + linerProfit + gumProfit;
-    return { cs, cd, revenue, profit, reelRevenue, reelProfit, reelKg, linerRevenue, linerProfit, linerKg, custLinersSold, gumRevenue, gumProfit, custChallans, custGumSold, custReelsSold };
+    const revenue = reelRevenue + gumRevenue;
+    const profit = reelProfit + gumProfit;
+    return { cs, cd, revenue, profit, reelRevenue, reelProfit, gumRevenue, gumProfit, custChallans, custGumSold };
   })() : null;
 
   // Bulk apply: compute preview
@@ -3201,15 +3238,12 @@ function HistoryTab({ state, update }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {[
                 { label: "Challans", val: custLedger.cs.challans || 0 },
-                { label: "Reels", val: custLedger.custReelsSold?.length || 0 },
-                { label: "Liners", val: custLedger.custLinersSold?.length || 0 },
+                { label: "Reels", val: custLedger.cs.reels || 0 },
                 { label: "Gum Sacks", val: custLedger.cs.gumSacks || 0 },
                 { label: "Revenue", val: custLedger.revenue ? fmtRs(custLedger.revenue) : "—" },
                 { label: "Profit", val: custLedger.profit ? fmtRs(custLedger.profit) : "—" },
-              ].filter(s => s.label !== "Liners" || custLedger.custLinersSold?.length > 0)
-               .filter(s => s.label !== "Gum Sacks" || custLedger.cs.gumSacks > 0)
-               .map(s => (
-                <div key={s.label} style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 72, textAlign: "center" }}>
+              ].map(s => (
+                <div key={s.label} style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 14px", flex: 1, minWidth: 80, textAlign: "center" }}>
                   <div style={{ fontSize: 10, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{s.label}</div>
                   <div style={{ fontWeight: 700, fontSize: 15, color: s.label === "Profit" && custLedger.profit < 0 ? "#b83020" : "#1a1a1a" }}>{s.val}</div>
                 </div>
@@ -3219,13 +3253,170 @@ function HistoryTab({ state, update }) {
 
           {/* Ledger tabs */}
           <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4 }}>
-            {[["overview","📊 Overview"], ["rates","₹ Bulk Apply"], ["history","📈 Rate History"]].map(([tab, label]) => (
+            {[["overview","📊 Overview"], ["payments","💳 Payments"], ["rates","₹ Bulk Apply"], ["history","📈 Rate History"]].map(([tab, label]) => (
               <button key={tab} onClick={() => setLedgerTab(tab)}
                 style={{ flex: 1, padding: "7px 4px", borderRadius: 7, border: "none", background: ledgerTab === tab ? "#fff" : "transparent", color: ledgerTab === tab ? "#1a1a1a" : "#8b6914", fontWeight: ledgerTab === tab ? 600 : 400, fontSize: 12, cursor: "pointer", boxShadow: ledgerTab === tab ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
                 {label}
               </button>
             ))}
           </div>
+
+          {/* PAYMENTS TAB */}
+          {ledgerTab === "payments" && custLedger && (() => {
+            const custPayments = payments.filter(p => p.customer === selCustomer).sort((a,b) => new Date(b.challanDate) - new Date(a.challanDate));
+            const custCreditDays = state.customerData?.[selCustomer]?.creditDays || null;
+            const totalBilled = custPayments.reduce((s,p) => s+(p.amount||0), 0);
+            const totalPaid = custPayments.filter(p=>p.paid).reduce((s,p) => s+(p.amount||0), 0);
+            const outstanding = totalBilled - totalPaid;
+            const custOverdue = custPayments.filter(p => !p.paid && p.dueDate && daysDiff(p.dueDate) < 0);
+            // Aging buckets for this customer
+            const aging = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+            custOverdue.forEach(p => { const d = Math.abs(daysDiff(p.dueDate)); if (d <= 30) aging["0-30"] += p.amount||0; else if (d <= 60) aging["31-60"] += p.amount||0; else if (d <= 90) aging["61-90"] += p.amount||0; else aging["90+"] += p.amount||0; });
+            // Payment gap (how late they actually pay)
+            const paidOnTime = custPayments.filter(p => p.paid && p.paidDate && p.dueDate);
+            const avgGap = paidOnTime.length ? Math.round(paidOnTime.reduce((s,p) => s + daysDiff2(p.paidDate, p.dueDate), 0) / paidOnTime.length) : null;
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {/* Credit period setting */}
+                <div className="card" style={{ padding: "14px 16px" }}>
+                  <h3 style={{ marginBottom: 10 }}>Default Credit Period</h3>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+                    {CREDIT_PRESETS.map(d => (
+                      <button key={d} onClick={() => {
+                        update(s => {
+                          if (!s.customerData) s.customerData = {};
+                          if (!s.customerData[selCustomer]) s.customerData[selCustomer] = { rateHistory: {} };
+                          s.customerData[selCustomer].creditDays = d;
+                          // Bulk-add all unpaid challans for this customer that don't have a payment entry
+                          if (!s.payments) s.payments = [];
+                          const allCustChallans = Object.values((() => {
+                            const cm = {}; s.stock.filter(r=>r.sold&&r.soldTo===selCustomer).forEach(r => { const k=r.soldChallanNo||`__${r.soldDate}__${r.soldTo}`; if(!cm[k]) cm[k]={challanNo:r.soldChallanNo||null,date:r.soldDate,customer:selCustomer,reels:[],gumSacks:[]}; cm[k].reels.push(r); }); (s.gumStock||[]).filter(g=>g.sold&&g.soldTo===selCustomer).forEach(g => { const k=g.soldChallanNo||`__${g.soldDate}__${g.soldTo}`; if(!cm[k]) cm[k]={challanNo:g.soldChallanNo||null,date:g.soldDate,customer:selCustomer,reels:[],gumSacks:[]}; cm[k].gumSacks.push(g); }); return cm;
+                          })());
+                          allCustChallans.forEach(ch => {
+                            const ck = makeChallanKey(ch);
+                            if (!s.payments.some(p => p.challanKey === ck)) {
+                              s.payments.push(buildPaymentEntry(ch, d));
+                            } else {
+                              // Update creditDays and dueDate for existing untracked entries
+                              const pi = s.payments.findIndex(p => p.challanKey === ck && !p.paid);
+                              if (pi !== -1 && !s.payments[pi].creditDays) {
+                                s.payments[pi].creditDays = d;
+                                s.payments[pi].dueDate = addDays(s.payments[pi].challanDate, d);
+                              }
+                            }
+                          });
+                        });
+                      }}
+                        style={{ padding: "5px 14px", borderRadius: 6, border: "1.5px solid", fontSize: 12, cursor: "pointer", fontWeight: custCreditDays === d ? 700 : 400, background: custCreditDays === d ? "#1a1a1a" : "#fff", color: custCreditDays === d ? "#fff" : "#6a6050", borderColor: custCreditDays === d ? "#1a1a1a" : "#ddd8ce" }}>
+                        {d}d
+                      </button>
+                    ))}
+                    <input type="number" inputMode="numeric" placeholder="Custom" style={{ width: 90 }}
+                      onBlur={e => {
+                        const d = parseInt(e.target.value);
+                        if (!d || d < 1) return;
+                        update(s => {
+                          if (!s.customerData) s.customerData = {};
+                          if (!s.customerData[selCustomer]) s.customerData[selCustomer] = { rateHistory: {} };
+                          s.customerData[selCustomer].creditDays = d;
+                          if (!s.payments) s.payments = [];
+                          const cm = {}; s.stock.filter(r=>r.sold&&r.soldTo===selCustomer).forEach(r => { const k=r.soldChallanNo||`__${r.soldDate}__${r.soldTo}`; if(!cm[k]) cm[k]={challanNo:r.soldChallanNo||null,date:r.soldDate,customer:selCustomer,reels:[],gumSacks:[]}; cm[k].reels.push(r); }); (s.gumStock||[]).filter(g=>g.sold&&g.soldTo===selCustomer).forEach(g => { const k=g.soldChallanNo||`__${g.soldDate}__${g.soldTo}`; if(!cm[k]) cm[k]={challanNo:g.soldChallanNo||null,date:g.soldDate,customer:selCustomer,reels:[],gumSacks:[]}; cm[k].gumSacks.push(g); });
+                          Object.values(cm).forEach(ch => { const ck=makeChallanKey(ch); if(!s.payments.some(p=>p.challanKey===ck)) s.payments.push(buildPaymentEntry(ch,d)); });
+                        });
+                        e.target.value = "";
+                      }} />
+                    {custCreditDays && <span style={{ fontSize: 12, color: "#2d6a4f", fontWeight: 600 }}>✓ {custCreditDays}d set</span>}
+                  </div>
+                  {custCreditDays && <div style={{ fontSize: 11, color: "#9a9080" }}>All existing and future challans use {custCreditDays}-day credit period by default. You can override per challan below.</div>}
+                </div>
+                {/* Running balance */}
+                {custPayments.length > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    {[
+                      { label: "Total Billed", val: fmtRs(totalBilled), color: "#1a1a1a", bg: "#fff" },
+                      { label: "Total Collected", val: fmtRs(totalPaid), color: "#2d6a4f", bg: "#edf7f0" },
+                      { label: "Outstanding", val: fmtRs(outstanding), color: outstanding > 0 ? "#b83020" : "#2d6a4f", bg: outstanding > 0 ? "#fef0ee" : "#edf7f0" },
+                    ].map(s => (
+                      <div key={s.label} style={{ background: s.bg, border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display',serif" }}>{s.val}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Aging + efficiency */}
+                {custOverdue.length > 0 && (
+                  <div className="card" style={{ padding: "12px 14px", background: "#fef0ee", border: "1px solid #f0c0ba" }}>
+                    <h3 style={{ color: "#b83020", marginBottom: 10 }}>Overdue Aging</h3>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {Object.entries(aging).filter(([,v])=>v>0).map(([bucket, amt]) => (
+                        <div key={bucket} style={{ background: "#fff", border: "1px solid #f0c0ba", borderRadius: 8, padding: "8px 12px", textAlign: "center" }}>
+                          <div style={{ fontSize: 10, color: "#b83020", fontWeight: 700 }}>{bucket}d</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#b83020" }}>{fmtRs(amt)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {avgGap !== null && (
+                  <div style={{ padding: "10px 14px", background: avgGap <= 0 ? "#edf7f0" : "#fef5e8", border: `1px solid ${avgGap <= 0 ? "#b5dcc0" : "#f0d5a0"}`, borderRadius: 10, fontSize: 12 }}>
+                    <span style={{ fontWeight: 600, color: avgGap <= 0 ? "#2d6a4f" : "#a05800" }}>
+                      {avgGap <= 0 ? `✓ Pays ${Math.abs(avgGap)}d early on average` : `Pays ${avgGap}d late on average`}
+                    </span>
+                    <span style={{ color: "#9a9080", marginLeft: 8 }}>across {paidOnTime.length} settled challan{paidOnTime.length!==1?"s":""}</span>
+                  </div>
+                )}
+                {/* Challan list */}
+                {custPayments.length === 0 ? (
+                  <div className="card" style={{ textAlign: "center", padding: 32 }}>
+                    <span style={{ fontSize: 13, color: "#b0a898" }}>No tracked payments yet. Set a credit period above to start tracking.</span>
+                  </div>
+                ) : (
+                  <div className="card-flat">
+                    {custPayments.map((p, pi) => {
+                      const status = getPaymentStatus(p);
+                      const badge = paymentStatusBadge(status, p.dueDate);
+                      return (
+                        <div key={p.id} style={{ padding: "12px 14px", borderBottom: pi < custPayments.length-1 ? "1px solid #e8eef8" : "none", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
+                              {p.challanNo && <span style={{ fontWeight: 700, fontSize: 13 }}>CH {p.challanNo}</span>}
+                              <span style={{ fontSize: 11, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "1px 7px", fontWeight: 600 }}>{badge.label}</span>
+                              {p.amount > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>{fmtRs(p.amount)}</span>}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#9a9080" }}>
+                              {fmtDate(p.challanDate)}
+                              {p.dueDate && <span> · Due {fmtDate(p.dueDate)}</span>}
+                              {p.paid && p.paidDate && <span style={{ color: "#2d6a4f" }}> · Paid {fmtDate(p.paidDate)}</span>}
+                            </div>
+                            {/* Per-challan credit days override */}
+                            {!p.paid && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 10, color: "#b0a898" }}>Override credit days:</span>
+                                {CREDIT_PRESETS.map(d => (
+                                  <button key={d} onClick={() => update(s => { const i=(s.payments||[]).findIndex(x=>x.id===p.id); if(i!==-1){s.payments[i].creditDays=d;s.payments[i].dueDate=addDays(s.payments[i].challanDate,d);} })}
+                                    style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, border: "1px solid", cursor: "pointer", background: p.creditDays===d?"#1a1a1a":"transparent", color: p.creditDays===d?"#fff":"#6a6050", borderColor: p.creditDays===d?"#1a1a1a":"#ddd8ce" }}>{d}d</button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ flexShrink: 0 }}>
+                            {!p.paid ? (
+                              <button onClick={() => update(s => { const i=(s.payments||[]).findIndex(x=>x.id===p.id); if(i!==-1){s.payments[i].paid=true;s.payments[i].paidDate=today();} })}
+                                style={{ background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✓ Mark Paid</button>
+                            ) : (
+                              <button onClick={() => update(s => { const i=(s.payments||[]).findIndex(x=>x.id===p.id); if(i!==-1){s.payments[i].paid=false;s.payments[i].paidDate=null;} })}
+                                style={{ background: "transparent", color: "#9a9080", border: "1px solid #ddd8ce", borderRadius: 7, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>Undo</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* OVERVIEW TAB — current rate card + top sizes */}
           {ledgerTab === "overview" && custLedger && (
@@ -3265,47 +3456,9 @@ function HistoryTab({ state, update }) {
               </div>
               {custLedger.cs.sizes && (
                 <div style={{ marginTop: 12, fontSize: 12, color: "#8b6914" }}>
-                  Top reel sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,5).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
+                  Top sizes: {Object.entries(custLedger.cs.sizes).sort((a,b) => b[1]-a[1]).slice(0,5).map(([sz,cnt]) => `${sz}" (${cnt}×)`).join(" · ")}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Liner sold summary in overview */}
-          {ledgerTab === "overview" && custLedger && custLedger.custLinersSold?.length > 0 && (
-            <div className="card" style={{ padding: "14px 16px", background: "#f0f8f4", border: "1.5px solid #b5dcc0" }}>
-              <h3 style={{ color: "#2d6a4f", marginBottom: 12 }}>📄 Liners Sold to This Customer</h3>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-                {[
-                  { label: "Liners Sold", val: custLedger.custLinersSold.length },
-                  { label: "Total Kg", val: fmt(Math.round(custLedger.linerKg)) + " kg" },
-                  { label: "Revenue", val: custLedger.linerRevenue > 0 ? fmtRs(custLedger.linerRevenue) : "—" },
-                  { label: "Profit", val: custLedger.linerProfit !== 0 && custLedger.linerRevenue > 0 ? fmtRs(custLedger.linerProfit) : "—" },
-                ].map(s => (
-                  <div key={s.label} style={{ background: "#fff", border: "1px solid #b5dcc0", borderRadius: 8, padding: "8px 12px", flex: 1, minWidth: 72, textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: "#2d6a4f", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1a1a1a" }}>{s.val}</div>
-                  </div>
-                ))}
-              </div>
-              {/* Show liner specs */}
-              {(() => {
-                const specMap = {};
-                custLedger.custLinersSold.forEach(r => {
-                  const k = `${r.bf} BF ${r.gsm} GSM ${r.size}"`;
-                  if (!specMap[k]) specMap[k] = { count: 0, kg: 0 };
-                  specMap[k].count++; specMap[k].kg += Number(r.weight);
-                });
-                return (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {Object.entries(specMap).sort((a,b) => b[1].kg - a[1].kg).map(([spec, d]) => (
-                      <span key={spec} style={{ background: "#edf7f0", border: "1px solid #b5dcc0", borderRadius: 6, padding: "4px 10px", fontSize: 12, color: "#2d6a4f", fontWeight: 500 }}>
-                        {spec} · {d.count}× · {fmt(Math.round(d.kg))} kg
-                      </span>
-                    ))}
-                  </div>
-                );
-              })()}
             </div>
           )}
 
@@ -3410,8 +3563,23 @@ function HistoryTab({ state, update }) {
           <div><div className="section-eyebrow">Records</div><h2>Sales History</h2></div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-outline btn-sm" onClick={() => setCustView("transporters")}>🚚 Transport</button>
-            <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>👥 Customers</button>
+            <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")} style={{ position: "relative" }}>
+              👥 Customers
+              {hasOverdues && <span style={{ position: "absolute", top: -4, right: -4, width: 9, height: 9, background: "#b83020", borderRadius: "50%", border: "2px solid #fff", display: "block" }} />}
+            </button>
           </div>
+        </div>
+      )}
+      {/* Overdue banner */}
+      {hasOverdues && !overduesDismissed && (
+        <div style={{ background: "#fef0ee", border: "1px solid #f0c0ba", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14 }}>🔴</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#b83020" }}>{overduePayments.length} overdue challan{overduePayments.length !== 1 ? "s" : ""}</span>
+            {overdueAmount > 0 && <span style={{ fontSize: 12, color: "#b83020" }}>· {fmtRs(overdueAmount)} pending</span>}
+            <button onClick={() => setCustView("customers")} style={{ fontSize: 11, color: "#b83020", background: "transparent", border: "1px solid #f0c0ba", borderRadius: 5, padding: "2px 8px", cursor: "pointer", marginLeft: 4 }}>View →</button>
+          </div>
+          <button onClick={() => setOverduesDismissed(true)} style={{ background: "transparent", border: "none", color: "#c08070", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>×</button>
         </div>
       )}
       {/* Filter bar */}
@@ -3743,6 +3911,45 @@ function HistoryTab({ state, update }) {
                         </div>
                       );
                     })()}
+                    {/* Payment status strip */}
+                    {(() => {
+                      const pmt = payments.find(p => p.challanKey === key);
+                      const status = getPaymentStatus(pmt);
+                      const badge = paymentStatusBadge(status, pmt?.dueDate);
+                      const challanVal2 = challanValue({ reels: ch.reels, gumSacks: ch.gumSacks||[] });
+                      if (!pmt && !ch.customer) return null;
+                      return (
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e8e2d8", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>💳 Payment</span>
+                          {pmt ? (
+                            <>
+                              <span style={{ fontSize: 11, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 8px", fontWeight: 600 }}>{badge.label}</span>
+                              {pmt.dueDate && !pmt.paid && <span style={{ fontSize: 11, color: "#9a9080" }}>Due {fmtDate(pmt.dueDate)}</span>}
+                              {pmt.paid && pmt.paidDate && <span style={{ fontSize: 11, color: "#9a9080" }}>on {fmtDate(pmt.paidDate)}</span>}
+                              {pmt.creditDays && <span style={{ fontSize: 10, color: "#b0a898" }}>{pmt.creditDays}d credit</span>}
+                              {!pmt.paid && (
+                                <button onClick={() => update(s => { const i = (s.payments||[]).findIndex(p => p.id === pmt.id); if (i !== -1) { s.payments[i].paid = true; s.payments[i].paidDate = today(); } })}
+                                  style={{ fontSize: 11, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", cursor: "pointer", marginLeft: "auto" }}>✓ Mark Paid</button>
+                              )}
+                              {pmt.paid && (
+                                <button onClick={() => update(s => { const i = (s.payments||[]).findIndex(p => p.id === pmt.id); if (i !== -1) { s.payments[i].paid = false; s.payments[i].paidDate = null; } })}
+                                  style={{ fontSize: 10, background: "transparent", color: "#9a9080", border: "1px solid #ddd8ce", borderRadius: 5, padding: "2px 8px", cursor: "pointer", marginLeft: "auto" }}>Undo</button>
+                              )}
+                            </>
+                          ) : (
+                            <button onClick={() => {
+                              const cd = state.customerData?.[ch.customer]?.creditDays || null;
+                              update(s => {
+                                if (!s.payments) s.payments = [];
+                                if (!s.payments.some(p => p.challanKey === key)) {
+                                  s.payments.push(buildPaymentEntry({ challanNo: ch.challanNo, date: ch.date, customer: ch.customer, reels: ch.reels, gumSacks: ch.gumSacks||[] }, cd));
+                                }
+                              });
+                            }} style={{ fontSize: 11, background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 5, padding: "2px 10px", cursor: "pointer" }}>+ Track Payment</button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -3881,7 +4088,7 @@ function ReportsTab({ state }) {
       <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
       {/* Section switcher */}
       <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start", flexWrap: "wrap" }}>
-        {[["reels","📦 Reels"],["liner","📄 Liner"],["gum","🪣 Gum"],["business","🏢 Full Business"]].map(([t, label]) => (
+        {[["reels","📦 Reels"],["liner","📄 Liner"],["gum","🪣 Gum"],["business","🏢 Full Business"],["payments","💳 Payments"]].map(([t, label]) => (
           <button key={t} onClick={() => setReportTab(t)}
             style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: reportTab === t ? "#fff" : "transparent", color: reportTab === t ? "#1a1a1a" : "#8b6914", fontWeight: reportTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: reportTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
             {label}
@@ -3892,6 +4099,7 @@ function ReportsTab({ state }) {
       {reportTab === "liner" && <LinerReport state={state} soldData={linerSold} />}
       {reportTab === "gum" && <GumReport state={state} soldData={gumSold} />}
       {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} gumSold={gumSold} allSold={allSold} />}
+      {reportTab === "payments" && <PaymentsReport state={state} />}
     </div>
   );
 }
@@ -4483,6 +4691,213 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold }) {
 
 
 // ─── OLD REPORTS TAB SHELL (now empty — replaced above) ──────────────────────
+// ─── PAYMENTS REPORT ─────────────────────────────────────────────────────────
+function PaymentsReport({ state }) {
+  const payments = state.payments || [];
+  const allMonths = [...new Set(payments.map(p => monthKey(p.challanDate)).filter(Boolean))].sort().reverse();
+  const [selMonth, setSelMonth] = useState("");
+
+  const filtered = selMonth ? payments.filter(p => monthKey(p.challanDate) === selMonth) : payments;
+  const tracked = filtered.filter(p => p.dueDate);
+  const paid = tracked.filter(p => p.paid);
+  const unpaid = tracked.filter(p => !p.paid);
+  const overdue = unpaid.filter(p => daysDiff(p.dueDate) < 0);
+  const dueSoon = unpaid.filter(p => daysDiff(p.dueDate) >= 0 && daysDiff(p.dueDate) <= 7);
+  const upcoming = unpaid.filter(p => daysDiff(p.dueDate) > 7);
+
+  const totalOutstanding = unpaid.reduce((s,p)=>s+(p.amount||0),0);
+  const totalOverdue = overdue.reduce((s,p)=>s+(p.amount||0),0);
+  const totalPaid = paid.reduce((s,p)=>s+(p.amount||0),0);
+
+  // Aging buckets (all unpaid overdue)
+  const aging = {"0-30":0,"31-60":0,"61-90":0,"90+":0};
+  const allOverdue = payments.filter(p=>!p.paid&&p.dueDate&&daysDiff(p.dueDate)<0);
+  allOverdue.forEach(p => { const d=Math.abs(daysDiff(p.dueDate)); if(d<=30) aging["0-30"]+=p.amount||0; else if(d<=60) aging["31-60"]+=p.amount||0; else if(d<=90) aging["61-90"]+=p.amount||0; else aging["90+"]+=p.amount||0; });
+
+  // Per-customer outstanding
+  const custOutMap = {};
+  payments.filter(p=>!p.paid&&p.dueDate).forEach(p => {
+    if (!custOutMap[p.customer]) custOutMap[p.customer] = { outstanding: 0, overdue: 0, count: 0 };
+    custOutMap[p.customer].outstanding += p.amount||0;
+    custOutMap[p.customer].count++;
+    if (daysDiff(p.dueDate) < 0) custOutMap[p.customer].overdue += p.amount||0;
+  });
+  const custOutList = Object.entries(custOutMap).sort((a,b)=>b[1].outstanding-a[1].outstanding);
+
+  // Collection efficiency per customer
+  const custEffMap = {};
+  payments.filter(p=>p.paid&&p.paidDate&&p.dueDate).forEach(p => {
+    if (!custEffMap[p.customer]) custEffMap[p.customer] = { onTime: 0, late: 0, totalGap: 0 };
+    const gap = daysDiff2(p.paidDate, p.dueDate);
+    if (gap <= 0) custEffMap[p.customer].onTime++; else custEffMap[p.customer].late++;
+    custEffMap[p.customer].totalGap += gap;
+  });
+
+  // Monthly collection trend
+  const last6 = allMonths.slice(0,6).reverse();
+  const trendData = last6.map(m => ({
+    label: monthLabel(m).split(" ")[0],
+    billed: payments.filter(p=>monthKey(p.challanDate)===m&&p.dueDate).reduce((s,p)=>s+(p.amount||0),0),
+    collected: payments.filter(p=>p.paid&&monthKey(p.challanDate)===m).reduce((s,p)=>s+(p.amount||0),0),
+  }));
+
+  if (payments.length === 0) return (
+    <div className="card" style={{ textAlign: "center", padding: 40 }}>
+      <div style={{ fontSize: 36, marginBottom: 12 }}>💳</div>
+      <div className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No payment data yet.</div>
+      <div style={{ fontSize: 12, color: "#b0a898", marginTop: 6 }}>Set a credit period on a customer in History → Customers → their ledger to start tracking.</div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Period filter */}
+      <div className="card" style={{ padding: "12px 16px" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div><label className="lbl">Filter Month</label>
+            <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
+              <option value="">All Time</option>
+              {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+          </div>
+          <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{selMonth ? monthLabel(selMonth) : "All Time"}</div>
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+        {[
+          { label: "Outstanding", val: fmtRs(totalOutstanding), color: totalOutstanding > 0 ? "#b83020" : "#2d6a4f", bg: "#fef0ee" },
+          { label: "Overdue", val: fmtRs(totalOverdue), color: "#b83020", bg: "#fef0ee" },
+          { label: "Collected", val: fmtRs(totalPaid), color: "#2d6a4f", bg: "#edf7f0" },
+          { label: "Due Soon", val: dueSoon.length + " challans", color: "#a05800", bg: "#fef5e8" },
+        ].map(k => (
+          <div key={k.label} className="card" style={{ padding: "12px 14px", background: k.bg, border: `1px solid ${k.color}33` }}>
+            <div className="lbl" style={{ color: k.color }}>{k.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: k.color, fontFamily: "'Playfair Display',serif", lineHeight: 1.2, marginTop: 4 }}>{k.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Aging buckets */}
+      {allOverdue.length > 0 && (
+        <div className="card">
+          <h3>Overdue Aging (All Customers)</h3>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {Object.entries(aging).map(([bucket, amt]) => (
+              <div key={bucket} style={{ flex: 1, minWidth: 80, background: amt > 0 ? "#fef0ee" : "#f5f0e8", border: `1px solid ${amt > 0 ? "#f0c0ba" : "#e5dece"}`, borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#b83020", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{bucket}d</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: amt > 0 ? "#b83020" : "#c8b89a", fontFamily: "'Playfair Display',serif" }}>{amt > 0 ? fmtRs(amt) : "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Per-customer outstanding */}
+      {custOutList.length > 0 && (
+        <div className="card">
+          <h3>Outstanding by Customer</h3>
+          <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+            {custOutList.map(([name, d], i) => (
+              <div key={name} style={{ display: "flex", alignItems: "center", padding: "11px 14px", borderBottom: i < custOutList.length-1 ? "1px solid #f0ece4" : "none", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{name}</div>
+                  <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{d.count} challan{d.count!==1?"s":""}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1a1a1a" }}>{fmtRs(d.outstanding)}</div>
+                  {d.overdue > 0 && <div style={{ fontSize: 11, color: "#b83020", fontWeight: 600 }}>🔴 {fmtRs(d.overdue)} overdue</div>}
+                </div>
+              </div>
+            ))}
+            <div style={{ padding: "10px 14px", background: "#f5f0e8", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
+              <span>Total Outstanding</span><span>{fmtRs(totalOutstanding)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Collection efficiency */}
+      {Object.keys(custEffMap).length > 0 && (
+        <div className="card">
+          <h3>Collection Efficiency per Customer</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 12 }}>
+              <thead><tr><th>Customer</th><th>On Time</th><th>Late</th><th>Avg Gap</th><th>Efficiency</th></tr></thead>
+              <tbody>
+                {Object.entries(custEffMap).sort((a,b)=>(b[1].onTime/(b[1].onTime+b[1].late||1))-(a[1].onTime/(a[1].onTime+a[1].late||1))).map(([name, d]) => {
+                  const total = d.onTime + d.late;
+                  const eff = total > 0 ? ((d.onTime/total)*100).toFixed(0) : "—";
+                  const avgGap = total > 0 ? Math.round(d.totalGap/total) : null;
+                  return (
+                    <tr key={name}>
+                      <td style={{ fontWeight: 600 }}>{name}</td>
+                      <td style={{ color: "#2d6a4f" }}>{d.onTime}</td>
+                      <td style={{ color: d.late > 0 ? "#b83020" : "#9a9080" }}>{d.late}</td>
+                      <td style={{ color: avgGap !== null ? (avgGap <= 0 ? "#2d6a4f" : "#b83020") : "#9a9080" }}>{avgGap !== null ? (avgGap <= 0 ? `${Math.abs(avgGap)}d early` : `${avgGap}d late`) : "—"}</td>
+                      <td><span style={{ fontWeight: 700, color: Number(eff) >= 80 ? "#2d6a4f" : Number(eff) >= 50 ? "#a05800" : "#b83020" }}>{eff}%</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly collection trend */}
+      {trendData.length > 1 && trendData.some(d => d.billed > 0 || d.collected > 0) && (
+        <div className="card">
+          <h3>Monthly: Billed vs Collected</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {trendData.map(d => {
+              const maxVal = Math.max(...trendData.map(x => Math.max(x.billed, x.collected)), 1);
+              return (
+                <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 11, color: "#9a9080", minWidth: 36 }}>{d.label}</span>
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
+                    {d.billed > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ height: 8, width: `${(d.billed/maxVal)*100}%`, background: "#8b6914", borderRadius: 4, minWidth: 4 }} />
+                      <span style={{ fontSize: 10, color: "#8b6914" }}>{fmtRs(d.billed)}</span>
+                    </div>}
+                    {d.collected > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ height: 8, width: `${(d.collected/maxVal)*100}%`, background: "#2d6a4f", borderRadius: 4, minWidth: 4 }} />
+                      <span style={{ fontSize: 10, color: "#2d6a4f" }}>{fmtRs(d.collected)}</span>
+                    </div>}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b6914" }}><div style={{ width: 10, height: 10, background: "#8b6914", borderRadius: 2 }} />Billed</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#2d6a4f" }}><div style={{ width: 10, height: 10, background: "#2d6a4f", borderRadius: 2 }} />Collected</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upcoming dues */}
+      {upcoming.length > 0 && (
+        <div className="card">
+          <h3>Upcoming — Due in 8+ Days</h3>
+          <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+            {upcoming.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,10).map((p,i,arr) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", padding: "10px 14px", borderBottom: i<arr.length-1?"1px solid #f0ece4":"none", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{p.customer}{p.challanNo ? <span style={{ fontWeight: 400, color: "#9a9080" }}> · CH {p.challanNo}</span> : ""}</div>
+                  <div style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)} <span style={{ color: "#2d2d2d", fontWeight: 600 }}>({daysDiff(p.dueDate)}d)</span></div>
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function _OldReportsTabBody({ state }) {
   const sold = state.stock.filter(r => r.sold && r.soldDate);
   const [periodMode, setPeriodMode] = useState("month");
@@ -5278,20 +5693,12 @@ function GumSellTab({ state, update }) {
   const [filterVariant, setFilterVariant] = useState("");
   const [done, setDone] = useState(null);
 
-  const { lastChallanNo: gumLastChallan, suggestedChallan, existingChallans: gumExistingChallans } = (() => {
-    const allSoldItems = [...(state.stock||[]).filter(r => r.sold && r.soldChallanNo), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo)];
-    const existing = new Set(allSoldItems.map(r => String(r.soldChallanNo).trim()));
-    const last = allSoldItems.sort((a, b) => new Date(b.soldDate||0) - new Date(a.soldDate||0))[0]?.soldChallanNo || "";
-    let suggested = "";
-    if (last) {
-      const m = last.match(/^(.*?)(\d+)$/);
-      if (m) {
-        const prefix = m[1]; let maxNum = 0;
-        existing.forEach(ch => { const mm = ch.match(/^(.*?)(\d+)$/); if (mm && mm[1] === prefix) maxNum = Math.max(maxNum, parseInt(mm[2], 10)); });
-        suggested = prefix + (maxNum + 1);
-      }
-    }
-    return { lastChallanNo: last, suggestedChallan: suggested, existingChallans: existing };
+  const suggestedChallan = (() => {
+    const allSoldStock = [...(state.stock||[]).filter(r => r.sold && r.soldChallanNo && r.soldDate), ...(state.gumStock||[]).filter(g => g.sold && g.soldChallanNo && g.soldDate)];
+    const last = allSoldStock.sort((a, b) => new Date(b.soldDate||b.soldDate) - new Date(a.soldDate)).find(x => x.soldChallanNo)?.soldChallanNo || "";
+    if (!last) return "";
+    const m = last.match(/^(.*?)(\d+)$/);
+    return m ? m[1] + (parseInt(m[2], 10) + 1) : "";
   })();
   const [challanNo, setChallanNo] = useState(suggestedChallan);
 
@@ -5320,6 +5727,17 @@ function GumSellTab({ state, update }) {
       if (transportBy.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===transportBy.trim().toLowerCase())) {
         s.transporters = [...(s.transporters||[]), transportBy.trim()].sort();
       }
+      // Auto-create payment entry
+      const creditDays = s.customerData?.[customer]?.creditDays || null;
+      if (creditDays && challanNo) {
+        if (!s.payments) s.payments = [];
+        const challanKey = challanNo || `__${date}__${customer}`;
+        if (!s.payments.some(p => p.challanKey === challanKey)) {
+          const gumList = s.gumStock.filter(g => selected.includes(g.id));
+          const chObj = { challanNo, date, customer, reels: [], gumSacks: gumList };
+          s.payments = [...s.payments, buildPaymentEntry(chObj, creditDays)];
+        }
+      }
     });
     setDone({ count: selected.length, kg: totalKg, customer, val: totalValue });
   };
@@ -5342,16 +5760,7 @@ function GumSellTab({ state, update }) {
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers||[]} placeholder="Customer name" /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div><label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · shared seq.</span> : ""}</label>
-            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 315"
-              style={{ borderColor: challanNo && gumExistingChallans.has(String(challanNo).trim()) ? "#b83020" : undefined }} />
-            <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-              {gumLastChallan && <span style={{ fontSize: 10, color: "#9a9080" }}>Last: <strong>{gumLastChallan}</strong></span>}
-              {suggestedChallan && <span style={{ fontSize: 10, color: "#8b6914", cursor: "pointer", textDecoration: "underline" }} onClick={() => setChallanNo(suggestedChallan)}>Use {suggestedChallan}</span>}
-            </div>
-            {challanNo && gumExistingChallans.has(String(challanNo).trim()) && (
-              <div style={{ fontSize: 11, color: "#b83020", marginTop: 4, fontWeight: 600 }}>⚠ Challan {challanNo} already exists!</div>
-            )}
-          </div>
+            <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 315" /></div>
         </div>
         <div style={{ marginTop: 10 }}>
           <label className="lbl">Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
@@ -5443,21 +5852,12 @@ function GumReport({ state, soldData }) {
   const variants = state.gumVariants || [];
   const allGumSold = soldData || [];
 
+  // Simple period filter
   const allMonths = [...new Set(allGumSold.map(g => monthKey(g.soldDate)).filter(Boolean))].sort().reverse();
   const [selMonth, setSelMonth] = useState(allMonths[0] || "");
-  const [selDate, setSelDate] = useState(today());
-  const [selWeek, setSelWeek] = useState(toISOWeek(new Date()));
   const [periodMode, setPeriodMode] = useState("all");
 
-  const periodSold = (() => {
-    if (periodMode === "all") return allGumSold;
-    if (periodMode === "day") return allGumSold.filter(g => g.soldDate === selDate);
-    if (periodMode === "week") { const [mon, sun] = weekToRange(selWeek); return allGumSold.filter(g => { const d = new Date(g.soldDate); return d >= mon && d <= sun; }); }
-    if (periodMode === "month") return allGumSold.filter(g => monthKey(g.soldDate) === selMonth);
-    return allGumSold;
-  })();
-
-  const periodLabel = periodMode === "all" ? "All Time" : periodMode === "day" ? fmtDate(selDate) : periodMode === "week" ? fmtWeekLabel(selWeek) : monthLabel(selMonth);
+  const periodSold = periodMode === "all" ? allGumSold : allGumSold.filter(g => monthKey(g.soldDate) === selMonth);
 
   const totalKg = periodSold.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
   const totalSacks = periodSold.length;
@@ -5510,7 +5910,7 @@ function GumReport({ state, soldData }) {
           <div>
             <label className="lbl">Period</label>
             <div style={{ display: "flex", gap: 4 }}>
-              {[["day","Day"],["week","Week"],["month","Month"],["all","All"]].map(([v, l]) => (
+              {[["all","All Time"],["month","Month"]].map(([v, l]) => (
                 <button key={v} onClick={() => setPeriodMode(v)}
                   style={{ padding: "6px 12px", borderRadius: 6, border: "1.5px solid", fontSize: 12, cursor: "pointer", fontWeight: periodMode === v ? 700 : 400, background: periodMode === v ? "#1a1a1a" : "#fff", color: periodMode === v ? "#fff" : "#6a6050", borderColor: periodMode === v ? "#1a1a1a" : "#ddd8ce" }}>
                   {l}
@@ -5518,8 +5918,6 @@ function GumReport({ state, soldData }) {
               ))}
             </div>
           </div>
-          {periodMode === "day" && <div><label className="lbl">Date</label><input type="date" value={selDate} onChange={e => setSelDate(e.target.value)} style={{ minWidth: 140 }} /></div>}
-          {periodMode === "week" && <div><label className="lbl">Week</label><input type="week" value={selWeek} onChange={e => setSelWeek(e.target.value)} style={{ minWidth: 160 }} /></div>}
           {periodMode === "month" && (
             <div>
               <label className="lbl">Month</label>
@@ -5528,17 +5926,9 @@ function GumReport({ state, soldData }) {
               </select>
             </div>
           )}
-          <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{periodLabel}</div>
         </div>
       </div>
 
-      {periodSold.length === 0 && (
-        <div className="card" style={{ textAlign: "center", padding: 32 }}>
-          <span className="serif-italic" style={{ fontSize: 15, color: "#b0a898" }}>No gum sales in this period.</span>
-        </div>
-      )}
-
-      {periodSold.length > 0 && <>
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
         {[
@@ -5683,7 +6073,6 @@ function GumReport({ state, soldData }) {
           </div>
         );
       })()}
-      </>}
     </div>
   );
 }
