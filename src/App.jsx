@@ -1105,8 +1105,6 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
         </div>
       )}
 
-      )}
-
       {/* ── TRANSPORT + WARAI RATES ── */}
       <div className="card">
         <h3 style={{ marginBottom: 12 }}>Landed Cost Additions <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>(optional — applies to whole shipment)</span></h3>
