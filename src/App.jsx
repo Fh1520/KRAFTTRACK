@@ -39,7 +39,7 @@ const LINER_GSM_OPTIONS = ["80", "90", "100", "110", "120", "130", "140", "150",
 const PRIORITY_GRADES = [{ bf: "18", gsm: "150" }, { bf: "22", gsm: "180" }];
 const isPriority = (bf, gsm) => PRIORITY_GRADES.some(p => p.bf === bf && p.gsm === gsm);
 
-const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [], gumVariants: [{ id: "gum_a", name: "Variant A", color: "#e8a020" }, { id: "gum_b", name: "Variant B", color: "#6a8a3a" }], gumStock: [], payments: [] };
+const INITIAL_STATE = { stock: [], grades: GRADES, customers: [], customerData: {}, linerCustomers: [], transporters: [], gumVariants: [{ id: "gum_a", name: "Variant A", color: "#e8a020" }, { id: "gum_b", name: "Variant B", color: "#6a8a3a" }], gumStock: [], payments: [], cancelledChallans: [] };
 
 // ─── PAYMENT HELPERS ──────────────────────────────────────────────────────────
 const CREDIT_PRESETS = [7, 15, 30, 45, 60, 90];
@@ -284,7 +284,7 @@ export default function App() {
             cloudSave(data);
           }
         }
-        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [], gumVariants: data.gumVariants || INITIAL_STATE.gumVariants, gumStock: data.gumStock || [], payments: data.payments || [] });
+        setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [], gumVariants: data.gumVariants || INITIAL_STATE.gumVariants, gumStock: data.gumStock || [], payments: data.payments || [], cancelledChallans: data.cancelledChallans || [] });
       }
       setSyncing(false);
     }, (error) => {
@@ -2814,8 +2814,19 @@ function HistoryTab({ state, update }) {
   const [selTransporter, setSelTransporter] = useState("");
   const [transporterMonth, setTransporterMonth] = useState("");
   const [overduesDismissed, setOverduesDismissed] = useState(false);
+  const [markingPaidId, setMarkingPaidId] = useState(null);
+  const [markPaidDate, setMarkPaidDate] = useState(today());
+  const [invoiceListFilter, setInvoiceListFilter] = useState(null); // null | "overdue" | "dueSoon" | "outstanding"
+  const [confirmDeleteCancelled, setConfirmDeleteCancelled] = useState(null);
+
+  const startMarkPaid = (id) => { setMarkingPaidId(id); setMarkPaidDate(today()); };
+  const confirmMarkPaid = (id) => {
+    update(s => { const i = (s.payments || []).findIndex(p => p.id === id); if (i !== -1) { s.payments[i].paid = true; s.payments[i].paidDate = markPaidDate || today(); } });
+    setMarkingPaidId(null);
+  };
 
   const payments = state.payments || [];
+  const cancelledChallans = state.cancelledChallans || [];
   const overduePayments = payments.filter(p => !p.paid && p.dueDate && daysDiff(p.dueDate) < 0);
   const dueSoonPayments = payments.filter(p => !p.paid && p.dueDate && daysDiff(p.dueDate) >= 0 && daysDiff(p.dueDate) <= 7);
   const hasOverdues = overduePayments.length > 0;
@@ -2892,6 +2903,28 @@ function HistoryTab({ state, update }) {
       c.reels.some(r => r.size?.includes(q))
     );
   }
+
+  // Merge in cancelled challans (audit trail only) so the numbering gap they
+  // leave behind is explained in the list, rather than looking like missing
+  // data entry. They carry no reel/grade detail, so size & grade filters
+  // (which are about live stock) exclude them; customer/month/search still apply.
+  let visibleCancelled = cancelledChallans;
+  if (filterCustomer) visibleCancelled = visibleCancelled.filter(c => c.customer === filterCustomer);
+  if (filterMonth) visibleCancelled = visibleCancelled.filter(c => monthKey(c.date) === filterMonth);
+  if (filterSize || filterGrade) visibleCancelled = [];
+  if (search) {
+    const q = search.toLowerCase();
+    visibleCancelled = visibleCancelled.filter(c =>
+      c.customer?.toLowerCase().includes(q) ||
+      c.challanNo?.toLowerCase().includes(q) ||
+      fmtDate(c.date).toLowerCase().includes(q)
+    );
+  }
+  challans = [...challans, ...visibleCancelled.map(c => ({
+    challanNo: c.challanNo, date: c.date, customer: c.customer, reels: [], gumSacks: [],
+    cancelled: true, cancelledMeta: c,
+  }))].sort((a, b) => new Date(a.date) - new Date(b.date));
+
   const hasFilters = filterCustomer || filterSize || filterGrade || filterMonth || search;
 
   const startEditChallan = (ch, key) => {
@@ -2942,14 +2975,41 @@ function HistoryTab({ state, update }) {
 
   const deleteChallan = (ch) => {
     const ids = ch.reels.map(r => r.id);
+    const gumIds = (ch.gumSacks || []).map(g => g.id);
+    const totalWt = ch.reels.reduce((s, r) => s + Number(r.weight || 0), 0);
+    const totalGumWt = (ch.gumSacks || []).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+    const sizesSummary = [...new Set(ch.reels.map(r => r.size).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).join(", ");
+    const chKey = makeChallanKey(ch);
     update(s => {
       s.stock = s.stock.map(r => ids.includes(r.id)
-        ? { ...r, sold: false, soldDate: undefined, soldTo: undefined, soldChallanNo: undefined }
+        ? { ...r, sold: false, soldDate: undefined, soldTo: undefined, soldChallanNo: undefined, transportBy: undefined }
         : r
       );
+      if (s.gumStock && gumIds.length) {
+        s.gumStock = s.gumStock.map(g => gumIds.includes(g.id)
+          ? { ...g, sold: false, soldDate: undefined, soldTo: undefined, soldChallanNo: undefined, transportBy: undefined }
+          : g
+        );
+      }
+      // Drop the payment entry — the sale behind it no longer stands
+      if (s.payments) s.payments = s.payments.filter(p => p.challanKey !== chKey);
+      // Keep an audit record so the challan number stays visible as "cancelled"
+      // instead of leaving a mystery gap in the sequence, and so it's excluded
+      // from sales counts, tempo runs, and reports (which all key off `sold`).
+      if (!s.cancelledChallans) s.cancelledChallans = [];
+      s.cancelledChallans.push({
+        id: genId(), challanNo: ch.challanNo || null, date: ch.date, customer: ch.customer || "",
+        reelCount: ch.reels.length, totalWt, gumSackCount: (ch.gumSacks || []).length, totalGumWt,
+        sizesSummary, cancelledAt: today(),
+      });
     });
     setConfirmDeleteChallan(null);
     setOpenChallan(null);
+  };
+
+  const deleteCancelledChallan = (id) => {
+    update(s => { s.cancelledChallans = (s.cancelledChallans || []).filter(c => c.id !== id); });
+    setConfirmDeleteCancelled(null);
   };
 
   // ── TRANSPORTER LIST VIEW ──
@@ -3141,14 +3201,16 @@ function HistoryTab({ state, update }) {
       {payments.filter(p => !p.paid && p.dueDate).length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
           {[
-            { label: "Overdue", val: overduePayments.length, amount: overdueAmount, color: "#b83020", bg: "#fef0ee", border: "#f0c0ba" },
-            { label: "Due ≤7d", val: dueSoonPayments.length, amount: dueSoonPayments.reduce((s,p)=>s+(p.amount||0),0), color: "#a05800", bg: "#fef5e8", border: "#f0d5a0" },
-            { label: "Outstanding", val: payments.filter(p=>!p.paid&&p.dueDate).length, amount: outstandingAmount, color: "#2d2d2d", bg: "#f5f0e8", border: "#e5dece" },
+            { key: "overdue", label: "Overdue", val: overduePayments.length, amount: overdueAmount, color: "#b83020", bg: "#fef0ee", border: "#f0c0ba" },
+            { key: "dueSoon", label: "Due ≤7d", val: dueSoonPayments.length, amount: dueSoonPayments.reduce((s,p)=>s+(p.amount||0),0), color: "#a05800", bg: "#fef5e8", border: "#f0d5a0" },
+            { key: "outstanding", label: "Outstanding", val: payments.filter(p=>!p.paid&&p.dueDate).length, amount: outstandingAmount, color: "#2d2d2d", bg: "#f5f0e8", border: "#e5dece" },
           ].map(s => (
-            <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+            <div key={s.label} onClick={() => s.val > 0 && setInvoiceListFilter(s.key)}
+              style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10, padding: "10px 12px", textAlign: "center", cursor: s.val > 0 ? "pointer" : "default" }}>
               <div style={{ fontSize: 10, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display',serif" }}>{s.val}</div>
               {s.amount > 0 && <div style={{ fontSize: 10, color: s.color, marginTop: 2 }}>{fmtRs(s.amount)}</div>}
+              {s.val > 0 && <div style={{ fontSize: 9, color: s.color, marginTop: 4, opacity: 0.7 }}>tap to view ›</div>}
             </div>
           ))}
         </div>
@@ -3482,8 +3544,19 @@ function HistoryTab({ state, update }) {
                           </div>
                           <div style={{ flexShrink: 0 }}>
                             {!p.paid ? (
-                              <button onClick={() => update(s => { const i=(s.payments||[]).findIndex(x=>x.id===p.id); if(i!==-1){s.payments[i].paid=true;s.payments[i].paidDate=today();} })}
-                                style={{ background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✓ Mark Paid</button>
+                              markingPaidId === p.id ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f5f0e8", border: "1px solid #e5dece", borderRadius: 7, padding: "5px 7px" }}>
+                                  <div>
+                                    <div style={{ fontSize: 9, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 1 }}>Paid on</div>
+                                    <input type="date" value={markPaidDate} max={today()} onChange={e => setMarkPaidDate(e.target.value)} style={{ fontSize: 12, padding: "3px 6px", minWidth: 0, width: 132 }} />
+                                  </div>
+                                  <button onClick={() => confirmMarkPaid(p.id)} style={{ background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>✓ Confirm</button>
+                                  <button onClick={() => setMarkingPaidId(null)} style={{ background: "transparent", color: "#9a9080", border: "none", fontSize: 16, cursor: "pointer", padding: "0 2px" }}>×</button>
+                                </div>
+                              ) : (
+                                <button onClick={() => startMarkPaid(p.id)}
+                                  style={{ background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✓ Mark Paid</button>
+                              )
                             ) : (
                               <button onClick={() => update(s => { const i=(s.payments||[]).findIndex(x=>x.id===p.id); if(i!==-1){s.payments[i].paid=false;s.payments[i].paidDate=null;} })}
                                 style={{ background: "transparent", color: "#9a9080", border: "1px solid #ddd8ce", borderRadius: 7, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>Undo</button>
@@ -3718,7 +3791,29 @@ function HistoryTab({ state, update }) {
             <div style={{ width: 28, flexShrink: 0 }} />
           </div>
           {challans.map((ch, idx) => {
-            const key = ch.challanNo || `__${ch.date}__${ch.customer}`;
+            const key = ch.cancelled ? `__cancelled_${ch.cancelledMeta.id}` : (ch.challanNo || `__${ch.date}__${ch.customer}`);
+
+            if (ch.cancelled) {
+              const cm = ch.cancelledMeta;
+              return (
+                <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #e8eef8" : "none", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, background: "#faf8f4" }}>
+                  <div style={{ flexShrink: 0, background: "#e8e2d8", width: 52, height: 40, borderRadius: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1 }}>
+                    <div style={{ fontSize: 8, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>CH</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#b0a898", textDecoration: "line-through" }}>{cm.challanNo || "—"}</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "#9a9080", textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cm.customer || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#b0a898" }}>
+                      {fmtDate(cm.date)} · {cm.reelCount} reel{cm.reelCount !== 1 ? "s" : ""}{cm.sizesSummary ? ` (${cm.sizesSummary}")` : ""}{cm.gumSackCount ? ` · ${cm.gumSackCount} gum sack${cm.gumSackCount !== 1 ? "s" : ""}` : ""}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#b83020", marginTop: 2, fontWeight: 600 }}>🚫 CANCELLED — stock returned, excluded from sales &amp; tempo runs</div>
+                  </div>
+                  <button onClick={() => setConfirmDeleteCancelled(cm.id)} title="Permanently remove this cancelled record"
+                    style={{ flexShrink: 0, background: "transparent", color: "#c0a898", border: "1px solid #e5dece", borderRadius: 5, padding: "3px 8px", fontSize: 11, cursor: "pointer" }}>✕</button>
+                </div>
+              );
+            }
+
             const isOpen = openChallan === key;
             const isEditing = editingChallan === key;
             const totalWt = ch.reels.reduce((s, r) => s + Number(r.weight), 0);
@@ -3877,7 +3972,7 @@ function HistoryTab({ state, update }) {
                         <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); startEditChallan(ch, key); }}>✎ Edit / Manage Reels</button>
                         <button onClick={e => { e.stopPropagation(); setConfirmDeleteChallan({ ch, key }); }}
                           style={{ background: "transparent", color: "#b83020", border: "1.5px solid #f0c0ba", borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>
-                          🗑 Undo Sale
+                          🚫 Cancel Sale
                         </button>
                       </div>
                     )}
@@ -4008,8 +4103,16 @@ function HistoryTab({ state, update }) {
                               {pmt.paid && pmt.paidDate && <span style={{ fontSize: 11, color: "#9a9080" }}>on {fmtDate(pmt.paidDate)}</span>}
                               {pmt.creditDays && <span style={{ fontSize: 10, color: "#b0a898" }}>{pmt.creditDays}d credit</span>}
                               {!pmt.paid && (
-                                <button onClick={() => update(s => { const i = (s.payments||[]).findIndex(p => p.id === pmt.id); if (i !== -1) { s.payments[i].paid = true; s.payments[i].paidDate = today(); } })}
-                                  style={{ fontSize: 11, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", cursor: "pointer", marginLeft: "auto" }}>✓ Mark Paid</button>
+                                markingPaidId === pmt.id ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", background: "#fff", border: "1px solid #e5dece", borderRadius: 6, padding: "4px 6px" }}>
+                                    <input type="date" value={markPaidDate} max={today()} onChange={e => setMarkPaidDate(e.target.value)} style={{ fontSize: 11, padding: "2px 5px", minWidth: 0, width: 122 }} />
+                                    <button onClick={() => confirmMarkPaid(pmt.id)} style={{ fontSize: 11, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>✓</button>
+                                    <button onClick={() => setMarkingPaidId(null)} style={{ background: "transparent", color: "#9a9080", border: "none", fontSize: 14, cursor: "pointer" }}>×</button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => startMarkPaid(pmt.id)}
+                                    style={{ fontSize: 11, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", cursor: "pointer", marginLeft: "auto" }}>✓ Mark Paid</button>
+                                )
                               )}
                               {pmt.paid && (
                                 <button onClick={() => update(s => { const i = (s.payments||[]).findIndex(p => p.id === pmt.id); if (i !== -1) { s.payments[i].paid = false; s.payments[i].paidDate = null; } })}
@@ -4038,23 +4141,72 @@ function HistoryTab({ state, update }) {
         </div>
       )}
 
-      {/* Confirm undo sale modal */}
+      {/* Confirm cancel sale modal */}
       {confirmDeleteChallan && (
         <div className="modal-bg" onClick={() => setConfirmDeleteChallan(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
-            <div className="serif" style={{ fontSize: 20, marginBottom: 10 }}>Undo this sale?</div>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+            <div className="serif" style={{ fontSize: 20, marginBottom: 10 }}>Cancel this sale?</div>
             <p style={{ fontSize: 13, color: "#8a8070", marginBottom: 6, lineHeight: 1.6 }}>
               This will mark all <strong>{confirmDeleteChallan.ch.reels.length} reels</strong> from{" "}
               <strong>{confirmDeleteChallan.ch.customer}</strong> as back in stock.
             </p>
-            <p style={{ fontSize: 12, color: "#b83020", marginBottom: 20 }}>The challan entry will be removed from history.</p>
+            <p style={{ fontSize: 12, color: "#6a6050", marginBottom: 20, lineHeight: 1.6 }}>
+              Challan <strong>{confirmDeleteChallan.ch.challanNo || "—"}</strong> stays in your history with a strikethrough, marked <strong>CANCELLED</strong> — so the number isn't reused and the gap is documented. It won't count toward sales totals, customer ledgers, payments, or tempo/transporter runs.
+            </p>
             <div style={{ display: "flex", gap: 10 }}>
-              <button className="btn btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => setConfirmDeleteChallan(null)}>Cancel</button>
-              <button style={{ flex: 1, background: "#b83020", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontSize: 13, cursor: "pointer" }} onClick={() => deleteChallan(confirmDeleteChallan.ch)}>Yes, Undo Sale</button>
+              <button className="btn btn-outline" style={{ flex: 1, justifyContent: "center" }} onClick={() => setConfirmDeleteChallan(null)}>Back</button>
+              <button style={{ flex: 1, background: "#b83020", color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontSize: 13, cursor: "pointer" }} onClick={() => deleteChallan(confirmDeleteChallan.ch)}>Yes, Cancel Sale</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Invoice list modal — Overdue / Due Soon / Outstanding */}
+      {invoiceListFilter && (() => {
+        const list = invoiceListFilter === "overdue" ? overduePayments
+          : invoiceListFilter === "dueSoon" ? dueSoonPayments
+          : payments.filter(p => !p.paid && p.dueDate);
+        const sorted = [...list].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+        const titleMap = { overdue: "Overdue Invoices", dueSoon: "Due Within 7 Days", outstanding: "All Outstanding Invoices" };
+        const total = sorted.reduce((s, p) => s + (p.amount || 0), 0);
+        return (
+          <div className="modal-bg" onClick={() => setInvoiceListFilter(null)}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                <div>
+                  <div className="serif" style={{ fontSize: 19 }}>{titleMap[invoiceListFilter]}</div>
+                  <div style={{ fontSize: 12, color: "#9a9080", marginTop: 2 }}>{sorted.length} invoice{sorted.length !== 1 ? "s" : ""} · {fmtRs(total)}</div>
+                </div>
+                <button onClick={() => setInvoiceListFilter(null)} style={{ background: "transparent", border: "none", color: "#9a9080", fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ overflowY: "auto", marginTop: 10, border: "1px solid #e8e2d8", borderRadius: 10 }}>
+                {sorted.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#b0a898" }}>Nothing here.</div>
+                ) : sorted.map((p, i) => {
+                  const status = getPaymentStatus(p);
+                  const badge = paymentStatusBadge(status, p.dueDate);
+                  return (
+                    <div key={p.id}
+                      onClick={() => { setSelCustomer(p.customer); setCustView("customerDetail"); setFilterCustomer(p.customer); setSearch(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); setInvoiceListFilter(null); }}
+                      style={{ padding: "11px 14px", borderBottom: i < sorted.length - 1 ? "1px solid #f0ece4" : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {p.customer || "—"}{p.challanNo ? <span style={{ fontWeight: 400, color: "#9a9080" }}> · CH {p.challanNo}</span> : ""}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)}</div>
+                      </div>
+                      <span style={{ fontSize: 10, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 7px", fontWeight: 600, flexShrink: 0 }}>{badge.label}</span>
+                      <div style={{ fontWeight: 700, fontSize: 13, flexShrink: 0, minWidth: 60, textAlign: "right" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -4827,6 +4979,41 @@ function PaymentsReport({ state }) {
   const allOverdue = payments.filter(p=>!p.paid&&p.dueDate&&daysDiff(p.dueDate)<0);
   allOverdue.forEach(p => { const d=Math.abs(daysDiff(p.dueDate)); if(d<=30) aging["0-30"]+=p.amount||0; else if(d<=60) aging["31-60"]+=p.amount||0; else if(d<=90) aging["61-90"]+=p.amount||0; else aging["90+"]+=p.amount||0; });
 
+  // Dues forecast by month — grouped by DUE date (not challan date), across all
+  // tracked unpaid invoices, regardless of the period filter above. This is
+  // for forecasting incoming/overdue cash by month rather than by when it was billed.
+  const dueMonthMap = {};
+  payments.filter(p => !p.paid && p.dueDate).forEach(p => {
+    const mk = monthKey(p.dueDate);
+    if (!dueMonthMap[mk]) dueMonthMap[mk] = { amount: 0, count: 0, overdueAmount: 0, overdueCount: 0 };
+    dueMonthMap[mk].amount += p.amount || 0;
+    dueMonthMap[mk].count++;
+    if (daysDiff(p.dueDate) < 0) { dueMonthMap[mk].overdueAmount += p.amount || 0; dueMonthMap[mk].overdueCount++; }
+  });
+  const dueMonthList = Object.entries(dueMonthMap).sort((a, b) => a[0].localeCompare(b[0]));
+  const curMonthKey = monthKey(today());
+
+  const exportDuesCSV = () => {
+    const rows = payments.filter(p => !p.paid && p.dueDate).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    const esc = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["Customer", "Challan No", "Challan Date", "Due Date", "Due Month", "Amount", "Status", "Days Overdue / Until Due"];
+    const lines = [header.map(esc).join(",")];
+    rows.forEach(p => {
+      const d = daysDiff(p.dueDate);
+      const status = d < 0 ? "Overdue" : d <= 7 ? "Due Soon" : "Upcoming";
+      lines.push([p.customer || "", p.challanNo || "", p.challanDate || "", p.dueDate || "", monthLabel(monthKey(p.dueDate)), p.amount || 0, status, d].map(esc).join(","));
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dues_${today()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   // Per-customer outstanding
   const custOutMap = {};
   payments.filter(p=>!p.paid&&p.dueDate).forEach(p => {
@@ -4866,14 +5053,17 @@ function PaymentsReport({ state }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Period filter */}
       <div className="card" style={{ padding: "12px 16px" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div><label className="lbl">Filter Month</label>
-            <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
-              <option value="">All Time</option>
-              {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-            </select>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div><label className="lbl">Filter Month</label>
+              <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
+                <option value="">All Time</option>
+                {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+              </select>
+            </div>
+            <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{selMonth ? monthLabel(selMonth) : "All Time"}</div>
           </div>
-          <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{selMonth ? monthLabel(selMonth) : "All Time"}</div>
+          <button className="btn btn-outline btn-sm" onClick={exportDuesCSV}>⬇ Export Dues CSV</button>
         </div>
       </div>
 
@@ -4903,6 +5093,39 @@ function PaymentsReport({ state }) {
                 <div style={{ fontSize: 16, fontWeight: 700, color: amt > 0 ? "#b83020" : "#c8b89a", fontFamily: "'Playfair Display',serif" }}>{amt > 0 ? fmtRs(amt) : "—"}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Dues forecast by month — grouped by due date, for cash-flow forecasting */}
+      {dueMonthList.length > 0 && (
+        <div className="card">
+          <h3>Dues Forecast by Month</h3>
+          <div style={{ fontSize: 11, color: "#9a9080", marginTop: -6, marginBottom: 10 }}>Grouped by due date, not billing date — shows what's overdue vs. still upcoming, month by month.</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 12, width: "100%" }}>
+              <thead><tr><th>Month</th><th>Invoices</th><th>Overdue</th><th>Total Due</th></tr></thead>
+              <tbody>
+                {dueMonthList.map(([mk, d]) => {
+                  const isPast = mk < curMonthKey;
+                  const isCurrent = mk === curMonthKey;
+                  return (
+                    <tr key={mk} style={{ background: isPast ? "#fef0ee" : isCurrent ? "#fef5e8" : "transparent" }}>
+                      <td style={{ fontWeight: 600 }}>{monthLabel(mk)}{isCurrent && <span style={{ fontSize: 9, color: "#a05800", marginLeft: 5 }}>(this month)</span>}</td>
+                      <td>{d.count}</td>
+                      <td style={{ color: d.overdueAmount > 0 ? "#b83020" : "#9a9080", fontWeight: d.overdueAmount > 0 ? 700 : 400 }}>{d.overdueAmount > 0 ? `${fmtRs(d.overdueAmount)} (${d.overdueCount})` : "—"}</td>
+                      <td style={{ fontWeight: 700 }}>{fmtRs(d.amount)}</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ background: "#f5f0e8", fontWeight: 700 }}>
+                  <td>Total</td>
+                  <td>{dueMonthList.reduce((s,[,d])=>s+d.count,0)}</td>
+                  <td style={{ color: "#b83020" }}>{fmtRs(dueMonthList.reduce((s,[,d])=>s+d.overdueAmount,0))}</td>
+                  <td>{fmtRs(dueMonthList.reduce((s,[,d])=>s+d.amount,0))}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       )}
