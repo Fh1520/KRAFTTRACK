@@ -2817,6 +2817,8 @@ function HistoryTab({ state, update }) {
   const [markingPaidId, setMarkingPaidId] = useState(null);
   const [markPaidDate, setMarkPaidDate] = useState(today());
   const [invoiceListFilter, setInvoiceListFilter] = useState(null); // null | "overdue" | "dueSoon" | "outstanding"
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invoiceCustFilter, setInvoiceCustFilter] = useState("");
   const [confirmDeleteCancelled, setConfirmDeleteCancelled] = useState(null);
 
   const startMarkPaid = (id) => { setMarkingPaidId(id); setMarkPaidDate(today()); };
@@ -3205,7 +3207,7 @@ function HistoryTab({ state, update }) {
             { key: "dueSoon", label: "Due ≤7d", val: dueSoonPayments.length, amount: dueSoonPayments.reduce((s,p)=>s+(p.amount||0),0), color: "#a05800", bg: "#fef5e8", border: "#f0d5a0" },
             { key: "outstanding", label: "Outstanding", val: payments.filter(p=>!p.paid&&p.dueDate).length, amount: outstandingAmount, color: "#2d2d2d", bg: "#f5f0e8", border: "#e5dece" },
           ].map(s => (
-            <div key={s.label} onClick={() => s.val > 0 && setInvoiceListFilter(s.key)}
+            <div key={s.label} onClick={() => { if (s.val > 0) { setInvoiceListFilter(s.key); setInvoiceSearch(""); setInvoiceCustFilter(""); setCustView("invoiceList"); } }}
               style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10, padding: "10px 12px", textAlign: "center", cursor: s.val > 0 ? "pointer" : "default" }}>
               <div style={{ fontSize: 10, color: s.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display',serif" }}>{s.val}</div>
@@ -3271,6 +3273,66 @@ function HistoryTab({ state, update }) {
       )}
     </div>
   );
+
+  if (custView === "invoiceList") {
+    const baseList = invoiceListFilter === "overdue" ? overduePayments
+      : invoiceListFilter === "dueSoon" ? dueSoonPayments
+      : payments.filter(p => !p.paid && p.dueDate);
+    const titleMap = { overdue: "Overdue Invoices", dueSoon: "Due Within 7 Days", outstanding: "All Outstanding Invoices" };
+    const invoiceCustomers = [...new Set(baseList.map(p => p.customer).filter(Boolean))].sort();
+    let sorted = [...baseList].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    if (invoiceCustFilter) sorted = sorted.filter(p => p.customer === invoiceCustFilter);
+    if (invoiceSearch) {
+      const q = invoiceSearch.toLowerCase();
+      sorted = sorted.filter(p => p.customer?.toLowerCase().includes(q) || p.challanNo?.toLowerCase().includes(q));
+    }
+    const total = sorted.reduce((s, p) => s + (p.amount || 0), 0);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>← Back</button>
+          <div><div className="section-eyebrow">Customers</div><h2>{titleMap[invoiceListFilter] || "Invoices"}</h2></div>
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{sorted.length} invoice{sorted.length !== 1 ? "s" : ""} · {fmtRs(total)}</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} placeholder="Search customer / challan no…" style={{ flex: 1, minWidth: 180 }} />
+          <select value={invoiceCustFilter} onChange={e => setInvoiceCustFilter(e.target.value)} style={{ minWidth: 150 }}>
+            <option value="">All customers</option>
+            {invoiceCustomers.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        {sorted.length === 0 ? (
+          <div className="card" style={{ textAlign: "center", padding: 40 }}>
+            <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>Nothing here.</span>
+          </div>
+        ) : (
+          <div className="card-flat">
+            {sorted.map((p, i) => {
+              const status = getPaymentStatus(p);
+              const badge = paymentStatusBadge(status, p.dueDate);
+              return (
+                <div key={p.id}
+                  onClick={() => { setSelCustomer(p.customer); setCustView("customerDetail"); setFilterCustomer(p.customer); setSearch(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); }}
+                  style={{ padding: "13px 16px", borderBottom: i < sorted.length - 1 ? "1px solid #e8eef8" : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.customer || "—"}{p.challanNo ? <span style={{ fontWeight: 400, color: "#9a9080" }}> · CH {p.challanNo}</span> : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)}</div>
+                  </div>
+                  <span style={{ fontSize: 10, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 7px", fontWeight: 600, flexShrink: 0 }}>{badge.label}</span>
+                  <div style={{ fontWeight: 700, fontSize: 13, flexShrink: 0, minWidth: 60, textAlign: "right" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
+                  <div style={{ color: "#c8b89a", fontSize: 16 }}>›</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const isCustomerDetail = custView === "customerDetail";
 
@@ -4160,53 +4222,6 @@ function HistoryTab({ state, update }) {
           </div>
         </div>
       )}
-
-      {/* Invoice list modal — Overdue / Due Soon / Outstanding */}
-      {invoiceListFilter && (() => {
-        const list = invoiceListFilter === "overdue" ? overduePayments
-          : invoiceListFilter === "dueSoon" ? dueSoonPayments
-          : payments.filter(p => !p.paid && p.dueDate);
-        const sorted = [...list].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-        const titleMap = { overdue: "Overdue Invoices", dueSoon: "Due Within 7 Days", outstanding: "All Outstanding Invoices" };
-        const total = sorted.reduce((s, p) => s + (p.amount || 0), 0);
-        return (
-          <div className="modal-bg" onClick={() => setInvoiceListFilter(null)}>
-            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                <div>
-                  <div className="serif" style={{ fontSize: 19 }}>{titleMap[invoiceListFilter]}</div>
-                  <div style={{ fontSize: 12, color: "#9a9080", marginTop: 2 }}>{sorted.length} invoice{sorted.length !== 1 ? "s" : ""} · {fmtRs(total)}</div>
-                </div>
-                <button onClick={() => setInvoiceListFilter(null)} style={{ background: "transparent", border: "none", color: "#9a9080", fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
-              </div>
-              <div style={{ overflowY: "auto", marginTop: 10, border: "1px solid #e8e2d8", borderRadius: 10 }}>
-                {sorted.length === 0 ? (
-                  <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#b0a898" }}>Nothing here.</div>
-                ) : sorted.map((p, i) => {
-                  const status = getPaymentStatus(p);
-                  const badge = paymentStatusBadge(status, p.dueDate);
-                  return (
-                    <div key={p.id}
-                      onClick={() => { setSelCustomer(p.customer); setCustView("customerDetail"); setFilterCustomer(p.customer); setSearch(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); setInvoiceListFilter(null); }}
-                      style={{ padding: "11px 14px", borderBottom: i < sorted.length - 1 ? "1px solid #f0ece4" : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {p.customer || "—"}{p.challanNo ? <span style={{ fontWeight: 400, color: "#9a9080" }}> · CH {p.challanNo}</span> : ""}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)}</div>
-                      </div>
-                      <span style={{ fontSize: 10, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 7px", fontWeight: 600, flexShrink: 0 }}>{badge.label}</span>
-                      <div style={{ fontWeight: 700, fontSize: 13, flexShrink: 0, minWidth: 60, textAlign: "right" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
