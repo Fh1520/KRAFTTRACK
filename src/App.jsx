@@ -4097,15 +4097,16 @@ function fmtWeekLabel(ws) {
 }
 
 // ── shared period-filter helper ──
-function usePeriod(sold) {
+function usePeriod(sold, extraForMonths = []) {
   const [periodMode, setPeriodMode] = useState("month");
   const [selDate, setSelDate] = useState(today());
   const [selWeek, setSelWeek] = useState(toISOWeek(new Date()));
+  const monthSource = extraForMonths.length ? [...sold, ...extraForMonths] : sold;
   const [selMonth, setSelMonth] = useState(() => {
-    const months = [...new Set(sold.map(r => monthKey(r.soldDate)).filter(Boolean))].sort().reverse();
+    const months = [...new Set(monthSource.map(r => monthKey(r.soldDate)).filter(Boolean))].sort().reverse();
     return months[0] || today().slice(0, 7);
   });
-  const allMonths = [...new Set(sold.map(r => monthKey(r.soldDate)))].sort().reverse();
+  const allMonths = [...new Set(monthSource.map(r => monthKey(r.soldDate)))].sort().reverse();
   const filter = r => {
     if (periodMode === "all") return true;
     if (periodMode === "day") return r.soldDate === selDate;
@@ -4115,6 +4116,7 @@ function usePeriod(sold) {
   };
   const periodSold = sold.filter(filter);
   const periodLabel = periodMode === "all" ? "All Time" : periodMode === "day" ? fmtDate(selDate) : periodMode === "week" ? fmtWeekLabel(selWeek) : monthLabel(selMonth);
+  const periodFilter = filter; // exposed so callers can apply the same date filter to other (non-`sold`) arrays, e.g. gum stock in BusinessReport
   const PeriodBar = () => (
     <div className="card" style={{ padding: "12px 16px" }}>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -4142,7 +4144,7 @@ function usePeriod(sold) {
       </div>
     </div>
   );
-  return { periodSold, periodLabel, PeriodBar };
+  return { periodSold, periodLabel, PeriodBar, periodFilter };
 }
 
 function ReportsTab({ state }) {
@@ -4638,12 +4640,12 @@ function LinerReport({ state, soldData }) {
 
 // ─── BUSINESS REPORT ─────────────────────────────────────────────────────────
 function BusinessReport({ state, reelSold, linerSold, gumSold, allSold }) {
-  const { periodSold: periodAll, periodLabel, PeriodBar } = usePeriod(allSold);
+  const { periodSold: periodAll, periodLabel, PeriodBar, periodFilter } = usePeriod(allSold, gumSold || []);
   const periodReels = periodAll.filter(r => r.productType !== "liner");
   const periodLiners = periodAll.filter(r => r.productType === "liner");
 
-  // Gum period filter based on same period as allSold
-  const gumSoldFiltered = (gumSold || []);
+  // Gum period filter — apply the same day/week/month/all selection used for reels & liner
+  const gumSoldFiltered = (gumSold || []).filter(periodFilter);
 
   const calc = arr => ({
     count: arr.length,
