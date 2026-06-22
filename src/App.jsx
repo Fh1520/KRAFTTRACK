@@ -47,7 +47,7 @@ function addDays(dateStr, days) { if (!dateStr || !days) return null; const d = 
 function daysDiff(dateStr) { if (!dateStr) return null; return Math.floor((new Date(dateStr) - new Date(today())) / 86400000); }
 function daysDiff2(dateA, dateB) { if (!dateA || !dateB) return null; return Math.floor((new Date(dateA) - new Date(dateB)) / 86400000); }
 function makeChallanKey(ch) { return ch.challanNo || `__${ch.date}__${ch.customer}`; }
-function buildPaymentEntry(ch, creditDays) { return { id: genId(), challanNo: ch.challanNo||null, challanKey: makeChallanKey(ch), customer: ch.customer||"", challanDate: ch.date, amount: challanValue(ch), creditDays: creditDays||null, dueDate: creditDays ? addDays(ch.date, creditDays) : null, paid: false, paidDate: null, partialAmount: null, note: "" }; }
+function buildPaymentEntry(ch, creditDays) { return { id: genId(), challanNo: ch.challanNo||null, challanKey: makeChallanKey(ch), customer: ch.customer||"", challanDate: ch.date, amount: challanGrandTotal(ch), creditDays: creditDays||null, dueDate: creditDays ? addDays(ch.date, creditDays) : null, paid: false, paidDate: null, partialAmount: null, note: "" }; }
 function getPaymentStatus(p) {
   if (!p) return "untracked";
   if (p.paid) return "paid";
@@ -2633,14 +2633,27 @@ function LinerStockTab({ state, update, isEmployee }) {
 function EditableLinerWeight({ liner, idx, update }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(liner.weight));
+  const [confirmDel, setConfirmDel] = useState(false);
   const save = () => {
     if (!val || isNaN(val)) { setEditing(false); return; }
     update(s => { const i = s.stock.findIndex(x => x.id === liner.id); if (i !== -1) s.stock[i].weight = val; });
     setEditing(false);
   };
+  const deleteLiner = () => {
+    update(s => { s.stock = s.stock.filter(x => x.id !== liner.id); });
+    setConfirmDel(false);
+  };
   return (
-    <div style={{ background: "#f8f7f4", border: `1.5px solid ${editing ? "#8b6914" : "#e8e2d8"}`, borderRadius: 8, padding: "7px 10px", textAlign: "center", minWidth: 80, position: "relative" }}>
-      {editing ? (
+    <div style={{ background: "#f9f9f9", border: `1.5px solid ${editing ? "#b8860b" : "rgba(0,0,0,0.08)"}`, borderRadius: 8, padding: "7px 10px", textAlign: "center", minWidth: 80, position: "relative" }}>
+      {confirmDel ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+          <div style={{ fontSize: 9, color: "#c62828", fontWeight: 700 }}>Delete?</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={deleteLiner} style={{ background: "#c62828", color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>Yes</button>
+            <button onClick={() => setConfirmDel(false)} style={{ background: "#eee", color: "#666", border: "none", borderRadius: 4, padding: "2px 6px", fontSize: 10, cursor: "pointer" }}>No</button>
+          </div>
+        </div>
+      ) : editing ? (
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)}
             style={{ width: 70, padding: "3px 6px", fontSize: 12, textAlign: "center" }}
@@ -2648,17 +2661,23 @@ function EditableLinerWeight({ liner, idx, update }) {
             onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
             onBlur={save}
           />
-          <span style={{ fontSize: 10, color: "#9a9080" }}>kg</span>
+          <span style={{ fontSize: 10, color: "#aaa" }}>kg</span>
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 10, color: "#b0a898", marginBottom: 2 }}>#{idx + 1}</div>
-          <div className="serif" style={{ fontSize: 18, lineHeight: 1 }}>{fmt(liner.weight)}</div>
-          <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
-          <button onClick={() => { setEditing(true); setVal(String(liner.weight)); }}
-            style={{ background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 4, padding: "2px 6px", fontSize: 9, cursor: "pointer", marginTop: 4, display: "block", width: "100%" }}>
-            Edit
-          </button>
+          <div style={{ fontSize: 10, color: "#bbb", marginBottom: 2 }}>#{idx + 1}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{fmt(liner.weight)}</div>
+          <div style={{ fontSize: 10, color: "#aaa" }}>kg</div>
+          <div style={{ display: "flex", gap: 3, marginTop: 4, justifyContent: "center" }}>
+            <button onClick={() => { setEditing(true); setVal(String(liner.weight)); }}
+              style={{ background: "transparent", color: "#b8860b", border: "1px solid #e8d48a", borderRadius: 4, padding: "2px 5px", fontSize: 9, cursor: "pointer" }}>
+              Edit
+            </button>
+            <button onClick={() => setConfirmDel(true)}
+              style={{ background: "transparent", color: "#c62828", border: "1px solid #f48fb1", borderRadius: 4, padding: "2px 5px", fontSize: 9, cursor: "pointer" }}>
+              Del
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -2952,6 +2971,7 @@ function HistoryTab({ state, update }) {
   const [invoiceListFilter, setInvoiceListFilter] = useState(null); // null | "overdue" | "dueSoon" | "outstanding"
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invoiceCustFilter, setInvoiceCustFilter] = useState("");
+  const [overdueTimeFilter, setOverdueTimeFilter] = useState("all");
   const [confirmDeleteCancelled, setConfirmDeleteCancelled] = useState(null);
 
   const startMarkPaid = (id) => { setMarkingPaidId(id); setMarkPaidDate(today()); };
@@ -3469,7 +3489,7 @@ function HistoryTab({ state, update }) {
       sorted = sorted.filter(p => p.customer?.toLowerCase().includes(q) || String(p.challanNo||"").toLowerCase().includes(q));
     }
     // Overdue time filters
-    const [overdueTimeFilter, setOverdueTimeFilter] = React.useState("all");
+
     if (invoiceListFilter === "overdue" && overdueTimeFilter !== "all") {
       if (overdueTimeFilter === "0-30") sorted = sorted.filter(p => Math.abs(daysDiff(p.dueDate)) <= 30);
       else if (overdueTimeFilter === "30-60") sorted = sorted.filter(p => Math.abs(daysDiff(p.dueDate)) > 30 && Math.abs(daysDiff(p.dueDate)) <= 60);
@@ -5213,37 +5233,37 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST 
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <PeriodBar />
       {/* Master KPI row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {[
-          { label: "Total Revenue", val: T.revenue > 0 ? fmtRs(T.revenue) : "—", unit: "all products" },
-          { label: "Total Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: T.revenue > 0 ? ((totalProfit/T.revenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+          { label: showGST ? "Total Revenue (GST)" : "Total Revenue", val: T.revenue > 0 ? fmtRs(showGST ? Math.round(R.revenue*1.18 + L.revenue*1.18 + G.revenue*1.05) : T.revenue) : "—", unit: showGST ? "GST included" : "all products" },
+          { label: "Total Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: T.revenue > 0 ? ((totalProfit/T.revenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2e7d32" : "#c62828" },
           { label: "Total Weight", val: fmt(Math.round(T.kg)) + " kg", unit: (T.kg/1000).toFixed(2) + " tons" },
           { label: "Total Orders", val: [...new Set(periodAll.map(r => r.soldChallanNo).filter(Boolean))].length || periodAll.length, unit: "challans dispatched" },
         ].map(k => (
           <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
             <div className="lbl">{k.label}</div>
-            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
-            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.2, color: k.color || "#111", letterSpacing: "-0.02em" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{k.unit}</div>}
           </div>
         ))}
       </div>
 
       {/* Side-by-side product comparison */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
         {[
-          { label: "📦 Reels", data: R, profit: reelProfit, color: "#8b6914", bg: "#fdf9f0" },
-          { label: "📄 Liner", data: L, profit: linerProfit, color: "#2a5a8a", bg: "#f0f5ff" },
-          { label: "🪣 Gum", data: G, profit: gumProfit, color: "#6a8a3a", bg: "#f0f7ea" },
-        ].map(({ label, data, profit, color, bg }) => (
-          <div key={label} className="card" style={{ background: bg, border: `1.5px solid ${color}22` }}>
+          { label: "📦 Reels", data: R, profit: reelProfit, color: "#b8860b", bg: "#fff8e7", gstMult: showGST ? 1.18 : 1 },
+          { label: "📄 Liner", data: L, profit: linerProfit, color: "#2a5a8a", bg: "#f0f5ff", gstMult: showGST ? 1.18 : 1 },
+          { label: "🪣 Gum", data: G, profit: gumProfit, color: "#4a8a3a", bg: "#f0f7ea", gstMult: showGST ? 1.05 : 1 },
+        ].map(({ label, data, profit, color, bg, gstMult }) => (
+          <div key={label} className="card" style={{ background: bg }}>
             <div style={{ fontSize: 13, fontWeight: 700, color, marginBottom: 10 }}>{label}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Items sold</span><strong>{data.count}</strong></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Weight</span><strong>{fmt(Math.round(data.kg))} kg</strong></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Revenue</span><strong>{data.revenue > 0 ? fmtRs(data.revenue) : "—"}</strong></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Profit</span><strong style={{ color: profit >= 0 ? "#2d6a4f" : "#b83020" }}>{data.revenue > 0 ? fmtRs(profit) : "—"}</strong></div>
-              {data.revenue > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Margin</span><strong style={{ color: profit >= 0 ? "#2d6a4f" : "#b83020" }}>{((profit/data.revenue)*100).toFixed(1)}%</strong></div>}
-              {T.revenue > 0 && data.revenue > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#8a8070" }}>Rev share</span><strong style={{ color }}>{((data.revenue/T.revenue)*100).toFixed(1)}%</strong></div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#888" }}>Items sold</span><strong>{data.count}</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#888" }}>Weight</span><strong>{fmt(Math.round(data.kg))} kg</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#888" }}>Revenue</span><strong>{data.revenue > 0 ? fmtRs(Math.round(data.revenue * gstMult)) : "—"}</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#888" }}>Profit</span><strong style={{ color: profit >= 0 ? "#2e7d32" : "#c62828" }}>{data.revenue > 0 ? fmtRs(profit) : "—"}</strong></div>
+              {data.revenue > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#888" }}>Margin</span><strong style={{ color: profit >= 0 ? "#2e7d32" : "#c62828" }}>{((profit/data.revenue)*100).toFixed(1)}%</strong></div>}
+              {T.revenue > 0 && data.revenue > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#888" }}>Rev share</span><strong style={{ color }}>{((data.revenue/T.revenue)*100).toFixed(1)}%</strong></div>}
             </div>
           </div>
         ))}
@@ -5251,7 +5271,7 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST 
 
       {/* Revenue & Profit split pies */}
       {revSplit.length > 1 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div className="card">
             <h3>Revenue Split</h3>
             <PieChart data={revSplit} size={140} />
@@ -5266,7 +5286,7 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST 
       {/* Combined monthly bar chart */}
       {trendData.length > 1 && (
         <div className="card">
-          <h3>Monthly Volume — Reels vs Liner (kg)</h3>
+          <h3>Monthly Volume — kg</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {trendData.map(d => {
               const maxVal = Math.max(...trendData.map(x => x.reels + x.liner), 1);
@@ -5274,29 +5294,27 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST 
               const linerW = (d.liner / maxVal) * 100;
               return (
                 <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 11, color: "#9a9080", minWidth: 36 }}>{d.label}</span>
-                  <div style={{ flex: 1, display: "flex", gap: 2, height: 18, borderRadius: 4, overflow: "hidden" }}>
-                    {d.reels > 0 && <div style={{ width: `${reelW}%`, background: "#8b6914", borderRadius: d.liner === 0 ? 4 : "4px 0 0 4px", transition: "width 0.4s" }} />}
-                    {d.liner > 0 && <div style={{ width: `${linerW}%`, background: "#3a7a8a", borderRadius: d.reels === 0 ? 4 : "0 4px 4px 0", transition: "width 0.4s" }} />}
+                  <span style={{ fontSize: 11, color: "#aaa", minWidth: 36 }}>{d.label}</span>
+                  <div style={{ flex: 1, display: "flex", gap: 2, height: 16, borderRadius: 4, overflow: "hidden" }}>
+                    {d.reels > 0 && <div style={{ width: `${reelW}%`, background: "#b8860b", borderRadius: d.liner === 0 ? 4 : "4px 0 0 4px" }} />}
+                    {d.liner > 0 && <div style={{ width: `${linerW}%`, background: "#3a7a8a", borderRadius: d.reels === 0 ? 4 : "0 4px 4px 0" }} />}
                   </div>
-                  <span style={{ fontSize: 11, color: "#6a6050", minWidth: 70, textAlign: "right" }}>
-                    {fmt(Math.round(d.reels + d.liner))} kg
-                  </span>
+                  <span style={{ fontSize: 11, color: "#888", minWidth: 70, textAlign: "right" }}>{fmt(Math.round(d.reels + d.liner))} kg</span>
                 </div>
               );
             })}
             <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b6914" }}><div style={{ width: 10, height: 10, background: "#8b6914", borderRadius: 2 }} />Reels</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#b8860b" }}><div style={{ width: 10, height: 10, background: "#b8860b", borderRadius: 2 }} />Reels</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#3a7a8a" }}><div style={{ width: 10, height: 10, background: "#3a7a8a", borderRadius: 2 }} />Liner</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6a8a3a" }}><div style={{ width: 10, height: 10, background: "#6a8a3a", borderRadius: 2 }} />Gum</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#4a8a3a" }}><div style={{ width: 10, height: 10, background: "#4a8a3a", borderRadius: 2 }} />Gum</span>
             </div>
           </div>
         </div>
       )}
 
       {/* Key insights dark card */}
-      <div className="card" style={{ background: "#1a1a1a", color: "#f4f7fb", border: "none" }}>
-        <h3 style={{ color: "#a09080", marginBottom: 16 }}>Key Insights — {periodLabel}</h3>
+      <div className="card" style={{ background: "#111", color: "#fff", border: "none" }}>
+        <h3 style={{ color: "#444", marginBottom: 16 }}>Key Insights — {periodLabel}</h3>
         <div className="g3">
           {[
             { label: "Strongest Product", val: R.revenue >= L.revenue && R.revenue >= G.revenue ? "Reels" : L.revenue >= G.revenue ? "Liner" : "Gum", sub: `${fmtRs(Math.max(R.revenue, L.revenue, G.revenue))} revenue` },
@@ -5304,9 +5322,9 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST 
             { label: "Total Business", val: fmtRs(T.revenue), sub: `${fmtRs(totalProfit)} profit` },
           ].map(x => (
             <div key={x.label}>
-              <div className="lbl" style={{ color: "#6a5a4a" }}>{x.label}</div>
-              <div className="serif" style={{ fontSize: 22, color: "#f4f7fb", lineHeight: 1.2 }}>{x.val}</div>
-              <div className="serif-italic" style={{ fontSize: 12, color: "#6a5a4a", marginTop: 4 }}>{x.sub}</div>
+              <div className="lbl" style={{ color: "#555" }}>{x.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.02em" }}>{x.val}</div>
+              <div style={{ fontSize: 11, color: "#555", marginTop: 3 }}>{x.sub}</div>
             </div>
           ))}
         </div>
@@ -5406,40 +5424,33 @@ function PaymentsReport({ state }) {
   if (payments.length === 0) return (
     <div className="card" style={{ textAlign: "center", padding: 40 }}>
       <div style={{ fontSize: 36, marginBottom: 12 }}>💳</div>
-      <div className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No payment data yet.</div>
-      <div style={{ fontSize: 12, color: "#b0a898", marginTop: 6 }}>Set a credit period on a customer in History → Customers → their ledger to start tracking.</div>
+      <div style={{ fontSize: 16, color: "#aaa", fontStyle: "italic" }}>No payment data yet.</div>
+      <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>Set a credit period on a customer in History → Customers → their ledger to start tracking.</div>
     </div>
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Period filter */}
-      <div className="card" style={{ padding: "12px 16px" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div><label className="lbl">Filter Month</label>
-              <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
-                <option value="">All Time</option>
-                {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-              </select>
-            </div>
-            <div style={{ fontSize: 12, color: "#8b6914", fontWeight: 600, paddingBottom: 4 }}>{selMonth ? monthLabel(selMonth) : "All Time"}</div>
-          </div>
-          <button className="btn btn-outline btn-sm" onClick={exportDuesCSV}>⬇ Export Dues CSV</button>
-        </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={{ minWidth: 130 }}>
+          <option value="">All Time</option>
+          {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+        </select>
+        <button className="btn btn-outline btn-sm" onClick={exportDuesCSV}>⬇ Export CSV</button>
       </div>
 
       {/* KPI row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
         {[
-          { label: "Outstanding", val: fmtRs(totalOutstanding), color: totalOutstanding > 0 ? "#b83020" : "#2d6a4f", bg: "#fef0ee" },
-          { label: "Overdue", val: fmtRs(totalOverdue), color: "#b83020", bg: "#fef0ee" },
-          { label: "Collected", val: fmtRs(totalPaid), color: "#2d6a4f", bg: "#edf7f0" },
-          { label: "Due Soon", val: dueSoon.length + " challans", color: "#a05800", bg: "#fef5e8" },
+          { label: "Outstanding", val: fmtRs(totalOutstanding), color: "#c62828", bg: "#fce4ec" },
+          { label: "Overdue", val: fmtRs(totalOverdue), color: "#c62828", bg: "#fce4ec" },
+          { label: "Collected", val: fmtRs(totalPaid), color: "#2e7d32", bg: "#e8f5e9" },
+          { label: "Due ≤7d", val: dueSoon.length + " ch", color: "#e65100", bg: "#fff3e0" },
         ].map(k => (
-          <div key={k.label} className="card" style={{ padding: "12px 14px", background: k.bg, border: `1px solid ${k.color}33` }}>
+          <div key={k.label} className="card" style={{ padding: "12px 14px", background: k.bg }}>
             <div className="lbl" style={{ color: k.color }}>{k.label}</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: k.color, fontFamily: "'Playfair Display',serif", lineHeight: 1.2, marginTop: 4 }}>{k.val}</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: k.color, lineHeight: 1.2, marginTop: 4, letterSpacing: "-0.02em" }}>{k.val}</div>
           </div>
         ))}
       </div>
@@ -5447,71 +5458,67 @@ function PaymentsReport({ state }) {
       {/* Aging buckets */}
       {allOverdue.length > 0 && (
         <div className="card">
-          <h3>Overdue Aging (All Customers)</h3>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <h3>Overdue Aging</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {Object.entries(aging).map(([bucket, amt]) => (
-              <div key={bucket} style={{ flex: 1, minWidth: 80, background: amt > 0 ? "#fef0ee" : "#f5f0e8", border: `1px solid ${amt > 0 ? "#f0c0ba" : "#e5dece"}`, borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#b83020", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{bucket}d</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: amt > 0 ? "#b83020" : "#c8b89a", fontFamily: "'Playfair Display',serif" }}>{amt > 0 ? fmtRs(amt) : "—"}</div>
+              <div key={bucket} style={{ flex: 1, minWidth: 70, background: amt > 0 ? "#fce4ec" : "#f5f5f5", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: amt > 0 ? "#c62828" : "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{bucket}d</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: amt > 0 ? "#c62828" : "#ccc" }}>{amt > 0 ? fmtRs(amt) : "—"}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Dues forecast by month — grouped by due date, for cash-flow forecasting */}
+      {/* Outstanding by customer — card rows with CH# */}
+      {custOutList.length > 0 && (
+        <div className="card-flat">
+          <div style={{ padding: "10px 14px", background: "#f5f5f5", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+            <h3 style={{ margin: 0 }}>Outstanding by Customer</h3>
+          </div>
+          {custOutList.map(([name, d], i) => (
+            <div key={name} style={{ display: "flex", alignItems: "center", padding: "12px 14px", borderBottom: i < custOutList.length-1 ? "1px solid rgba(0,0,0,0.04)" : "none", gap: 10 }}>
+              <div style={{ width: 36, height: 36, background: "#111", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 14, flexShrink: 0 }}>
+                {name.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>{d.count} challan{d.count!==1?"s":""}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#111" }}>{fmtRs(d.outstanding)}</div>
+                {d.overdue > 0 && <div style={{ fontSize: 10, color: "#c62828", fontWeight: 700, marginTop: 1 }}>🔴 {fmtRs(d.overdue)} overdue</div>}
+              </div>
+            </div>
+          ))}
+          <div style={{ padding: "10px 14px", background: "#f5f5f5", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
+            <span>Total Outstanding</span><span>{fmtRs(totalOutstanding)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Dues forecast */}
       {dueMonthList.length > 0 && (
         <div className="card">
           <h3>Dues Forecast by Month</h3>
-          <div style={{ fontSize: 11, color: "#9a9080", marginTop: -6, marginBottom: 10 }}>Grouped by due date, not billing date — shows what's overdue vs. still upcoming, month by month.</div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ fontSize: 12, width: "100%" }}>
-              <thead><tr><th>Month</th><th>Invoices</th><th>Overdue</th><th>Total Due</th></tr></thead>
-              <tbody>
-                {dueMonthList.map(([mk, d]) => {
-                  const isPast = mk < curMonthKey;
-                  const isCurrent = mk === curMonthKey;
-                  return (
-                    <tr key={mk} style={{ background: isPast ? "#fef0ee" : isCurrent ? "#fef5e8" : "transparent" }}>
-                      <td style={{ fontWeight: 600 }}>{monthLabel(mk)}{isCurrent && <span style={{ fontSize: 9, color: "#a05800", marginLeft: 5 }}>(this month)</span>}</td>
-                      <td>{d.count}</td>
-                      <td style={{ color: d.overdueAmount > 0 ? "#b83020" : "#9a9080", fontWeight: d.overdueAmount > 0 ? 700 : 400 }}>{d.overdueAmount > 0 ? `${fmtRs(d.overdueAmount)} (${d.overdueCount})` : "—"}</td>
-                      <td style={{ fontWeight: 700 }}>{fmtRs(d.amount)}</td>
-                    </tr>
-                  );
-                })}
-                <tr style={{ background: "#f5f0e8", fontWeight: 700 }}>
-                  <td>Total</td>
-                  <td>{dueMonthList.reduce((s,[,d])=>s+d.count,0)}</td>
-                  <td style={{ color: "#b83020" }}>{fmtRs(dueMonthList.reduce((s,[,d])=>s+d.overdueAmount,0))}</td>
-                  <td>{fmtRs(dueMonthList.reduce((s,[,d])=>s+d.amount,0))}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Per-customer outstanding */}
-      {custOutList.length > 0 && (
-        <div className="card">
-          <h3>Outstanding by Customer</h3>
-          <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
-            {custOutList.map(([name, d], i) => (
-              <div key={name} style={{ display: "flex", alignItems: "center", padding: "11px 14px", borderBottom: i < custOutList.length-1 ? "1px solid #f0ece4" : "none", gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{name}</div>
-                  <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{d.count} challan{d.count!==1?"s":""}</div>
+          <div style={{ fontSize: 11, color: "#aaa", marginTop: -6, marginBottom: 10 }}>By due date — shows cash-flow by month.</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {dueMonthList.map(([mk, d]) => {
+              const isPast = mk < curMonthKey;
+              const isCurrent = mk === curMonthKey;
+              return (
+                <div key={mk} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", borderRadius: 8, background: isPast ? "#fce4ec" : isCurrent ? "#fff3e0" : "#f9f9f9" }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{monthLabel(mk)}{isCurrent && <span style={{ fontSize: 9, color: "#e65100", marginLeft: 5 }}>this month</span>}</div>
+                    <div style={{ fontSize: 10, color: "#aaa" }}>{d.count} invoices{d.overdueCount > 0 ? ` · ${d.overdueCount} overdue` : ""}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: isPast ? "#c62828" : "#111" }}>{fmtRs(d.amount)}</div>
+                    {d.overdueAmount > 0 && <div style={{ fontSize: 10, color: "#c62828", fontWeight: 600 }}>{fmtRs(d.overdueAmount)} overdue</div>}
+                  </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1a1a1a" }}>{fmtRs(d.outstanding)}</div>
-                  {d.overdue > 0 && <div style={{ fontSize: 11, color: "#b83020", fontWeight: 600 }}>🔴 {fmtRs(d.overdue)} overdue</div>}
-                </div>
-              </div>
-            ))}
-            <div style={{ padding: "10px 14px", background: "#f5f0e8", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
-              <span>Total Outstanding</span><span>{fmtRs(totalOutstanding)}</span>
-            </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -5519,32 +5526,26 @@ function PaymentsReport({ state }) {
       {/* Collection efficiency */}
       {Object.keys(custEffMap).length > 0 && (
         <div className="card">
-          <h3>Collection Efficiency per Customer</h3>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ fontSize: 12 }}>
-              <thead><tr><th>Customer</th><th>On Time</th><th>Late</th><th>Avg Gap</th><th>Efficiency</th></tr></thead>
-              <tbody>
-                {Object.entries(custEffMap).sort((a,b)=>(b[1].onTime/(b[1].onTime+b[1].late||1))-(a[1].onTime/(a[1].onTime+a[1].late||1))).map(([name, d]) => {
-                  const total = d.onTime + d.late;
-                  const eff = total > 0 ? ((d.onTime/total)*100).toFixed(0) : "—";
-                  const avgGap = total > 0 ? Math.round(d.totalGap/total) : null;
-                  return (
-                    <tr key={name}>
-                      <td style={{ fontWeight: 600 }}>{name}</td>
-                      <td style={{ color: "#2d6a4f" }}>{d.onTime}</td>
-                      <td style={{ color: d.late > 0 ? "#b83020" : "#9a9080" }}>{d.late}</td>
-                      <td style={{ color: avgGap !== null ? (avgGap <= 0 ? "#2d6a4f" : "#b83020") : "#9a9080" }}>{avgGap !== null ? (avgGap <= 0 ? `${Math.abs(avgGap)}d early` : `${avgGap}d late`) : "—"}</td>
-                      <td><span style={{ fontWeight: 700, color: Number(eff) >= 80 ? "#2d6a4f" : Number(eff) >= 50 ? "#a05800" : "#b83020" }}>{eff}%</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <h3>Collection Efficiency</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {Object.entries(custEffMap).sort((a,b)=>(b[1].onTime/(b[1].onTime+b[1].late||1))-(a[1].onTime/(a[1].onTime+a[1].late||1))).map(([name, d]) => {
+              const total = d.onTime + d.late;
+              const eff = total > 0 ? Math.round((d.onTime/total)*100) : 0;
+              const avgGap = total > 0 ? Math.round(d.totalGap/total) : null;
+              return (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "#f9f9f9", borderRadius: 8 }}>
+                  <div style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{name}</div>
+                  <div style={{ fontSize: 11, color: "#aaa" }}>{d.onTime}✓ {d.late}✗</div>
+                  {avgGap !== null && <div style={{ fontSize: 11, color: avgGap <= 0 ? "#2e7d32" : "#c62828", fontWeight: 600 }}>{avgGap <= 0 ? `${Math.abs(avgGap)}d early` : `${avgGap}d late`}</div>}
+                  <div style={{ fontSize: 12, fontWeight: 800, color: eff >= 80 ? "#2e7d32" : eff >= 50 ? "#e65100" : "#c62828", minWidth: 38, textAlign: "right" }}>{eff}%</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Monthly collection trend */}
+      {/* Monthly trend */}
       {trendData.length > 1 && trendData.some(d => d.billed > 0 || d.collected > 0) && (
         <div className="card">
           <h3>Monthly: Billed vs Collected</h3>
@@ -5553,43 +5554,49 @@ function PaymentsReport({ state }) {
               const maxVal = Math.max(...trendData.map(x => Math.max(x.billed, x.collected)), 1);
               return (
                 <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 11, color: "#9a9080", minWidth: 36 }}>{d.label}</span>
+                  <span style={{ fontSize: 11, color: "#aaa", minWidth: 36 }}>{d.label}</span>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
                     {d.billed > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ height: 8, width: `${(d.billed/maxVal)*100}%`, background: "#8b6914", borderRadius: 4, minWidth: 4 }} />
-                      <span style={{ fontSize: 10, color: "#8b6914" }}>{fmtRs(d.billed)}</span>
+                      <div style={{ height: 8, width: `${(d.billed/maxVal)*100}%`, background: "#b8860b", borderRadius: 4, minWidth: 4 }} />
+                      <span style={{ fontSize: 10, color: "#b8860b" }}>{fmtRs(d.billed)}</span>
                     </div>}
                     {d.collected > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ height: 8, width: `${(d.collected/maxVal)*100}%`, background: "#2d6a4f", borderRadius: 4, minWidth: 4 }} />
-                      <span style={{ fontSize: 10, color: "#2d6a4f" }}>{fmtRs(d.collected)}</span>
+                      <div style={{ height: 8, width: `${(d.collected/maxVal)*100}%`, background: "#2e7d32", borderRadius: 4, minWidth: 4 }} />
+                      <span style={{ fontSize: 10, color: "#2e7d32" }}>{fmtRs(d.collected)}</span>
                     </div>}
                   </div>
                 </div>
               );
             })}
             <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b6914" }}><div style={{ width: 10, height: 10, background: "#8b6914", borderRadius: 2 }} />Billed</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#2d6a4f" }}><div style={{ width: 10, height: 10, background: "#2d6a4f", borderRadius: 2 }} />Collected</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#b8860b" }}><div style={{ width: 10, height: 10, background: "#b8860b", borderRadius: 2 }} />Billed</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#2e7d32" }}><div style={{ width: 10, height: 10, background: "#2e7d32", borderRadius: 2 }} />Collected</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Upcoming dues */}
+      {/* Upcoming dues — card rows with CH# */}
       {upcoming.length > 0 && (
-        <div className="card">
-          <h3>Upcoming — Due in 8+ Days</h3>
-          <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
-            {upcoming.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,10).map((p,i,arr) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", padding: "10px 14px", borderBottom: i<arr.length-1?"1px solid #f0ece4":"none", gap: 10 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{p.customer}{p.challanNo ? <span style={{ fontWeight: 400, color: "#9a9080" }}> · CH {p.challanNo}</span> : ""}</div>
-                  <div style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)} <span style={{ color: "#2d2d2d", fontWeight: 600 }}>({daysDiff(p.dueDate)}d)</span></div>
-                </div>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
-              </div>
-            ))}
+        <div className="card-flat">
+          <div style={{ padding: "10px 14px", background: "#f5f5f5", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+            <h3 style={{ margin: 0 }}>Upcoming — Due in 8+ Days</h3>
           </div>
+          {upcoming.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,10).map((p,i,arr) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "stretch", borderBottom: i<arr.length-1?"1px solid rgba(0,0,0,0.04)":"none" }}>
+              <div style={{ flexShrink:0, background:"#111", width:48, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"8px 4px", gap:1 }}>
+                <div style={{ fontSize:7, color:"#666", textTransform:"uppercase", letterSpacing:"0.06em" }}>CH</div>
+                <div style={{ fontSize:13, fontWeight:800, color: p.challanNo?"#fff":"#666", textAlign:"center" }}>{p.challanNo||"—"}</div>
+              </div>
+              <div style={{ flex:1, padding:"10px 12px" }}>
+                <div style={{ fontWeight:700, fontSize:13, color:"#111" }}>{p.customer}</div>
+                <div style={{ fontSize:11, color:"#aaa", marginTop:1 }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)} <span style={{ color:"#111", fontWeight:600 }}>({daysDiff(p.dueDate)}d)</span></div>
+              </div>
+              <div style={{ padding:"10px 12px", display:"flex", alignItems:"center" }}>
+                <div style={{ fontWeight:800, fontSize:13, color:"#111" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -6438,27 +6445,43 @@ function GumStockTab({ state, update, isEmployee }) {
 function EditableGumSack({ sack, idx, update }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(String(sack.sackWeight));
+  const [confirmDel, setConfirmDel] = useState(false);
   const save = () => {
     if (!val || isNaN(val)) { setEditing(false); return; }
     update(s => { const i = (s.gumStock||[]).findIndex(x => x.id === sack.id); if (i !== -1) s.gumStock[i].sackWeight = Number(val); });
     setEditing(false);
   };
+  const deleteSack = () => {
+    update(s => { s.gumStock = (s.gumStock||[]).filter(x => x.id !== sack.id); });
+  };
   return (
-    <div style={{ background: "#f8f7f4", border: `1.5px solid ${editing ? "#8b6914" : "#e8e2d8"}`, borderRadius: 8, padding: "7px 10px", textAlign: "center", minWidth: 80 }}>
-      {editing ? (
+    <div style={{ background: "#f9f9f9", border: `1.5px solid ${editing ? "#b8860b" : "rgba(0,0,0,0.08)"}`, borderRadius: 8, padding: "7px 10px", textAlign: "center", minWidth: 80 }}>
+      {confirmDel ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+          <div style={{ fontSize: 9, color: "#c62828", fontWeight: 700 }}>Delete?</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={deleteSack} style={{ background: "#c62828", color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 10, cursor: "pointer" }}>Yes</button>
+            <button onClick={() => setConfirmDel(false)} style={{ background: "#eee", color: "#666", border: "none", borderRadius: 4, padding: "2px 6px", fontSize: 10, cursor: "pointer" }}>No</button>
+          </div>
+        </div>
+      ) : editing ? (
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)}
             style={{ width: 65, padding: "3px 6px", fontSize: 12, textAlign: "center" }} autoFocus
             onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }} onBlur={save} />
-          <span style={{ fontSize: 10, color: "#9a9080" }}>kg</span>
+          <span style={{ fontSize: 10, color: "#aaa" }}>kg</span>
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 10, color: "#b0a898", marginBottom: 2 }}>#{idx+1}</div>
-          <div className="serif" style={{ fontSize: 18, lineHeight: 1 }}>{fmt(sack.sackWeight)}</div>
-          <div style={{ fontSize: 10, color: "#9a9080" }}>kg</div>
-          <button onClick={() => { setEditing(true); setVal(String(sack.sackWeight)); }}
-            style={{ background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 4, padding: "2px 6px", fontSize: 9, cursor: "pointer", marginTop: 4, display: "block", width: "100%" }}>Edit</button>
+          <div style={{ fontSize: 10, color: "#bbb", marginBottom: 2 }}>#{idx+1}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{fmt(sack.sackWeight)}</div>
+          <div style={{ fontSize: 10, color: "#aaa" }}>kg</div>
+          <div style={{ display: "flex", gap: 3, marginTop: 4, justifyContent: "center" }}>
+            <button onClick={() => { setEditing(true); setVal(String(sack.sackWeight)); }}
+              style={{ background: "transparent", color: "#b8860b", border: "1px solid #e8d48a", borderRadius: 4, padding: "2px 5px", fontSize: 9, cursor: "pointer" }}>Edit</button>
+            <button onClick={() => setConfirmDel(true)}
+              style={{ background: "transparent", color: "#c62828", border: "1px solid #f48fb1", borderRadius: 4, padding: "2px 5px", fontSize: 9, cursor: "pointer" }}>Del</button>
+          </div>
         </>
       )}
     </div>
