@@ -46,7 +46,6 @@ const CREDIT_PRESETS = [7, 15, 30, 45, 60, 90];
 function addDays(dateStr, days) { if (!dateStr || !days) return null; const d = new Date(dateStr); d.setDate(d.getDate() + Number(days)); return d.toISOString().slice(0,10); }
 function daysDiff(dateStr) { if (!dateStr) return null; return Math.floor((new Date(dateStr) - new Date(today())) / 86400000); }
 function daysDiff2(dateA, dateB) { if (!dateA || !dateB) return null; return Math.floor((new Date(dateA) - new Date(dateB)) / 86400000); }
-function challanValue(ch) { const rv=(ch.reels||[]).reduce((s,r)=>s+(Number(r.soldRate)||0)*Number(r.weight),0); const gv=(ch.gumSacks||[]).reduce((s,g)=>s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0); return rv+gv; }
 function makeChallanKey(ch) { return ch.challanNo || `__${ch.date}__${ch.customer}`; }
 function buildPaymentEntry(ch, creditDays) { return { id: genId(), challanNo: ch.challanNo||null, challanKey: makeChallanKey(ch), customer: ch.customer||"", challanDate: ch.date, amount: challanValue(ch), creditDays: creditDays||null, dueDate: creditDays ? addDays(ch.date, creditDays) : null, paid: false, paidDate: null, partialAmount: null, note: "" }; }
 function getPaymentStatus(p) {
@@ -98,6 +97,37 @@ function fmtDate(d) { if (!d) return "—"; return new Date(d).toLocaleDateStrin
 function today() { return new Date().toISOString().slice(0, 10); }
 function monthKey(d) { return d ? d.slice(0, 7) : ""; }
 function monthLabel(k) { if (!k) return ""; const [y, m] = k.split("-"); return new Date(y, m - 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" }); }
+
+// ─── GST HELPERS ──────────────────────────────────────────────────────────────
+// GST rates: reels/liner = 18% (CGST 9% + SGST 9%), gum = 5% (CGST 2.5% + SGST 2.5%)
+function gstRate(isGum) { return isGum ? 0.05 : 0.18; }
+function cgstRate(isGum) { return isGum ? 0.025 : 0.09; }
+function sgstRate(isGum) { return isGum ? 0.025 : 0.09; }
+// Challan totals — reels + transport = taxable, then GST on that
+function challanItemTotal(ch) {
+  const rv = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0);
+  const gv = (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0);
+  return rv + gv;
+}
+function challanTransportCharge(ch) { return Number(ch.transportCharge) || 0; }
+function challanTaxableAmount(ch) { return challanItemTotal(ch) + challanTransportCharge(ch); }
+function challanGST(ch) {
+  // Split by reels (18%) and gum (5%) — if mixed, each portion taxed at its rate
+  const reelTotal = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0);
+  const gumTotal = (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0);
+  const transport = challanTransportCharge(ch);
+  // Transport GST follows reel rate (18%) if reels present, gum rate if gum only
+  const transportGst = reelTotal > 0 ? transport * 0.18 : transport * 0.05;
+  const reelGst = reelTotal * 0.18;
+  const gumGst = gumTotal * 0.05;
+  const totalGst = reelGst + gumGst + transportGst;
+  return { reelGst, gumGst, transportGst, totalGst, cgst: totalGst/2, sgst: totalGst/2 };
+}
+function challanGrandTotal(ch) { return Math.round(challanTaxableAmount(ch) + challanGST(ch).totalGst); }
+// Updated challanValue — now returns ex-GST total (item + transport) for payment tracking
+function challanValue(ch) { return challanItemTotal(ch) + challanTransportCharge(ch); }
+// With-GST value
+function challanValueWithGST(ch) { return challanGrandTotal(ch); }
 
 const TABS = ["Home", "Stock", "Sell", "History", "Reports", "Settings"];
 const EMPLOYEE_TABS = ["Home", "Stock"];
@@ -334,74 +364,99 @@ export default function App() {
   const moderateItems = Object.values(sizeCountMap).filter(x => x.count === 3).sort((a, b) => Number(a.size) - Number(b.size));
 
   return (
-    <div style={{ fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", background: "#f8f7f4", minHeight: "100vh", color: "#1a1a1a" }}>
+    <div style={{ fontFamily: "'Inter', 'Helvetica Neue', sans-serif", background: "#f4f4f2", minHeight: "100vh", color: "#111" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500;600;700;800&display=swap');
+        :root{--accent:#b8860b;--accent-light:#fff8e7;--accent-border:#e8d48a;--bg:#f4f4f2;--surface:#fff;--border:rgba(0,0,0,0.08);--text:#111;--text-secondary:#666;--text-tertiary:#aaa;--success:#22c55e;--success-bg:#e8f5e9;--danger:#ef4444;--danger-bg:#fce4ec;--warn:#f97316;--warn-bg:#fff3e0;--shadow-sm:0 1px 3px rgba(0,0,0,0.06),0 2px 8px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.08);--radius:14px;--radius-sm:10px;--radius-xs:7px}
         *{box-sizing:border-box;margin:0;padding:0}
-        body{background:#f4f7fb}
-        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#edeae4}::-webkit-scrollbar-thumb{background:#c8b89a;border-radius:2px}
-        input,select,textarea{background:#fff!important;border:1.5px solid #ddd8ce!important;color:#1a1a1a!important;padding:9px 12px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;width:100%;transition:all 0.15s;resize:vertical}
-        input:focus,select:focus,textarea:focus{border-color:#8b6914!important;box-shadow:0 0 0 3px rgba(139,105,20,0.07)}
-        select option{background:#fff;color:#1a1a1a}
-        input[type="checkbox"]{width:auto!important;accent-color:#8b6914;cursor:pointer}
-        button{cursor:pointer;font-family:'DM Sans',sans-serif}
-        .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500;border:none;transition:all 0.15s}
-        .btn-dark{background:#1a1a1a;color:#fff}.btn-dark:hover{background:#2d2d2d}.btn-dark:disabled{background:#b0a898;cursor:not-allowed}
-        .btn-outline{background:transparent;color:#1a1a1a;border:1.5px solid #ddd8ce!important}.btn-outline:hover{border-color:#8b6914!important;color:#8b6914}
+        body{background:var(--bg)}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#ebebeb}::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}
+        input,select,textarea{background:#fff!important;border:1.5px solid rgba(0,0,0,0.12)!important;color:#111!important;padding:9px 12px;border-radius:var(--radius-xs);font-family:'Inter',sans-serif;font-size:13px;outline:none;width:100%;transition:border-color 0.15s,box-shadow 0.15s;resize:vertical}
+        input:focus,select:focus,textarea:focus{border-color:var(--accent)!important;box-shadow:0 0 0 3px rgba(184,134,11,0.10)}
+        select option{background:#fff;color:#111}
+        input[type="checkbox"]{width:auto!important;accent-color:var(--accent);cursor:pointer}
+        button{cursor:pointer;font-family:'Inter',sans-serif;transition:all 0.15s}
+        .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:var(--radius-xs);font-size:13px;font-weight:600;border:none;transition:all 0.15s;letter-spacing:-0.01em}
+        .btn-dark{background:#111;color:#fff}.btn-dark:hover{background:#222;transform:translateY(-1px);box-shadow:var(--shadow-md)}.btn-dark:disabled{background:#bbb;cursor:not-allowed;transform:none;box-shadow:none}
+        .btn-outline{background:transparent;color:#111;border:1.5px solid rgba(0,0,0,0.14)!important}.btn-outline:hover{border-color:var(--accent)!important;color:var(--accent)}
         .btn-sm{padding:6px 12px;font-size:12px}
-        .card{background:#fff;border:1px solid #e8e2d8;border-radius:14px;padding:22px}
-        .card-flat{background:#fff;border:1px solid #e8e2d8;border-radius:14px;overflow:hidden}
-        .tag{display:inline-block;background:#f5f0e8;border:1px solid #e5dece;border-radius:4px;padding:2px 8px;font-size:11px;color:#2d2d2d;font-weight:500}
-        .tag-green{background:#edf7f0;border-color:#b5dcc0;color:#2d6a4f}
-        .tag-red{background:#fef0ee;border-color:#f0c0ba;color:#b83020}
-        .tag-orange{background:#fef5e8;border-color:#f0d5a0;color:#a05800}
-        .tag-blue{background:#f5f0e8;border-color:#c8b89a;color:#2d2d2d}
-        .lbl{font-size:10px;color:#8a8070;text-transform:uppercase;letter-spacing:0.09em;margin-bottom:5px;display:block;font-weight:600}
-        .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-        .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-        .g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
-        .g5{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px}
+        .card{background:var(--surface);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow-sm)}
+        .card-flat{background:var(--surface);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm)}
+        .tag{display:inline-block;background:#f5f5f5;border-radius:5px;padding:2px 8px;font-size:11px;color:#555;font-weight:500}
+        .tag-green{background:#e8f5e9;color:#2e7d32}
+        .tag-red{background:#fce4ec;color:#c62828}
+        .tag-orange{background:#fff3e0;color:#e65100}
+        .tag-blue{background:#f0f4ff;color:#3a5a9a}
+        .lbl{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.09em;margin-bottom:5px;display:block;font-weight:600}
+        .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+        .g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+        .g5{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px}
         table{width:100%;border-collapse:collapse;font-size:13px}
-        th{color:#9a9080;font-weight:600;text-align:left;padding:10px 16px;border-bottom:1px solid #e8e2d8;font-size:10px;text-transform:uppercase;letter-spacing:0.08em}
-        td{padding:12px 16px;border-bottom:1px solid #e8eef8}
+        th{color:#999;font-weight:600;text-align:left;padding:10px 16px;border-bottom:1px solid rgba(0,0,0,0.06);font-size:10px;text-transform:uppercase;letter-spacing:0.08em}
+        td{padding:11px 16px;border-bottom:1px solid rgba(0,0,0,0.04)}
         tr:last-child td{border-bottom:none}
-        tr:hover td{background:#faf8f4}
-        .sep{height:1px;background:#e8e2d8;margin:16px 0}
-        h1{font-family:'Playfair Display',serif;font-size:32px;font-weight:500;letter-spacing:-0.02em;line-height:1.1;color:#1a1a1a}
-        h2{font-family:'Playfair Display',serif;font-size:24px;font-weight:500;letter-spacing:-0.01em;color:#1a1a1a}
-        h3{font-size:11px;font-weight:600;color:#6a6050;margin-bottom:14px;letter-spacing:0.08em;text-transform:uppercase}
+        tr:hover td{background:#fafafa}
+        .sep{height:1px;background:rgba(0,0,0,0.06);margin:14px 0}
+        h1{font-family:'Playfair Display',serif;font-size:30px;font-weight:500;letter-spacing:-0.02em;line-height:1.1;color:#111}
+        h2{font-family:'Playfair Display',serif;font-size:22px;font-weight:500;letter-spacing:-0.01em;color:#111}
+        h3{font-size:11px;font-weight:700;color:#888;margin-bottom:12px;letter-spacing:0.08em;text-transform:uppercase}
         .serif{font-family:'Playfair Display',serif}
         .serif-italic{font-family:'Playfair Display',serif;font-style:italic}
-        .stat-num{font-family:'Playfair Display',serif;font-size:42px;line-height:1;font-weight:500;color:#1a1a1a}
-        .section-eyebrow{font-family:'Playfair Display',serif;font-size:14px;font-style:italic;font-weight:400;color:#8a7868;margin-bottom:4px}
-        .ok-box{background:#edf7f0;border:1px solid #b5dcc0;border-radius:8px;padding:11px 14px;font-size:12px;color:#2d6a4f}
-        .err-box{background:#fef0ee;border:1px solid #f0c0ba;border-radius:8px;padding:11px 14px;font-size:12px;color:#b83020}
-        .warn-box{background:#fef5e8;border:1px solid #f0d5a0;border-radius:8px;padding:11px 14px;font-size:12px;color:#a05800}
-        .low-alert{background:#fef9ee;border:1px solid #f0d5a0;border-radius:14px;padding:18px 22px}
-        .moderate-alert{background:#f4f8ff;border:1px solid #c8b89a;border-radius:14px;padding:18px 22px}
-        .sync-dot{width:6px;height:6px;border-radius:50%;background:#52c478;display:inline-block;margin-right:5px;animation:pulse 2s infinite}
-        .sync-dot-err{width:6px;height:6px;border-radius:50%;background:#e05030;display:inline-block;margin-right:5px}
+        .stat-num{font-size:38px;line-height:1;font-weight:800;color:#111;letter-spacing:-0.03em}
+        .section-eyebrow{font-family:'Playfair Display',serif;font-size:13px;font-style:italic;font-weight:400;color:#999;margin-bottom:3px}
+        .ok-box{background:#e8f5e9;border:1px solid #a5d6a7;border-radius:var(--radius-xs);padding:11px 14px;font-size:12px;color:#2e7d32;font-weight:500}
+        .err-box{background:#fce4ec;border:1px solid #f48fb1;border-radius:var(--radius-xs);padding:11px 14px;font-size:12px;color:#c62828;font-weight:500}
+        .warn-box{background:#fff3e0;border:1px solid #ffcc80;border-radius:var(--radius-xs);padding:11px 14px;font-size:12px;color:#e65100;font-weight:500}
+        .low-alert{background:#fff3e0;border:1px solid #ffcc80;border-radius:var(--radius);padding:16px 18px}
+        .moderate-alert{background:#f0f4ff;border:1px solid #c5cae9;border-radius:var(--radius);padding:16px 18px}
+        .sync-dot{width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:5px;animation:pulse 2s infinite}
+        .sync-dot-err{width:6px;height:6px;border-radius:50%;background:#ef4444;display:inline-block;margin-right:5px}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-        .fade-in{animation:fadeIn 0.25s ease}
-        @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
-        .modal{background:#fff;border-radius:16px;padding:28px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.15)}
-        @media(max-width:640px){.g2,.g3,.g4,.g5{grid-template-columns:1fr 1fr}}
-        @media(max-width:400px){.g2,.g3,.g4,.g5{grid-template-columns:1fr}}
+        .fade-in{animation:fadeIn 0.2s ease}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
+        .modal{background:#fff;border-radius:18px;padding:24px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,0.18)}
+        /* ── GST breakup ── */
+        .gst-section{background:#f9f9f9;border-radius:10px;padding:12px 14px;margin-bottom:8px}
+        .gst-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px}
+        .gst-label{color:#666}
+        .gst-value{font-weight:600;color:#111}
+        .gst-value.green{color:#22c55e}
+        .gst-total-bar{background:#111;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+        /* ── bottom nav mobile ── */
+        .bottom-nav{display:none;background:#fff;border-top:1px solid rgba(0,0,0,0.06);position:fixed;bottom:0;left:0;right:0;z-index:150;padding:6px 0 10px;box-shadow:0 -4px 20px rgba(0,0,0,0.06)}
+        .bottom-nav-inner{display:flex;justify-content:space-around;max-width:500px;margin:0 auto}
+        .bn-item{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 8px;cursor:pointer;border:none;background:transparent;flex:1}
+        .bn-icon{font-size:18px;line-height:1}
+        .bn-lbl{font-size:8px;font-weight:500;color:#aaa;letter-spacing:0.02em}
+        .bn-item.active .bn-lbl{color:#111;font-weight:700}
+        .bn-dot{width:4px;height:4px;border-radius:50%;background:#111;margin:1px auto 0}
+        /* ── transport toggle ── */
+        .transport-toggle{display:flex;gap:5px}
+        .tt-option{flex:1;border-radius:var(--radius-xs);padding:8px 4px;text-align:center;border:1.5px solid rgba(0,0,0,0.10);background:#fff;cursor:pointer;transition:all 0.15s}
+        .tt-option.active{background:#111;border-color:#111}
+        .tt-label{font-size:9px;font-weight:700;color:#aaa;margin-top:2px}
+        .tt-option.active .tt-label{color:#fff}
+        .tt-icon{font-size:15px}
         @media(max-width:640px){
+          .g2,.g3,.g4,.g5{grid-template-columns:1fr 1fr}
           .brand-text{display:none!important}
           .brand-divider{display:none!important}
           .brand-mobile{display:flex!important}
           .nav-sync-text{display:none!important}
           .nav-inner{padding:0 8px!important}
-          h1{font-size:26px!important}
-          h2{font-size:20px!important}
+          h1{font-size:24px!important}
+          h2{font-size:19px!important}
           .card{padding:14px!important}
-          .card-flat .card{padding:14px!important}
-          .stat-num{font-size:32px!important}
+          .stat-num{font-size:30px!important}
+          .bottom-nav{display:block}
+          .main-content{padding-bottom:72px!important}
         }
+        @media(max-width:400px){.g2,.g3,.g4,.g5{grid-template-columns:1fr}}
         @media(min-width:641px){
           .brand-mobile{display:none!important}
+          .bottom-nav{display:none!important}
         }
       `}</style>
 
@@ -451,7 +506,7 @@ export default function App() {
         </div>
       </nav>
 
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in">
+      <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in main-content">
         {tab === "Home"     && <HomeTab     state={state} setTab={setTab} setStockNav={setStockNav} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} isEmployee={IS_EMPLOYEE_VIEW} />}
         {tab === "Stock"    && <StockTab    state={state} update={update} stockNav={stockNav} clearStockNav={() => setStockNav(null)} isEmployee={IS_EMPLOYEE_VIEW} />}
         {!IS_EMPLOYEE_VIEW && tab === "Sell"     && <SellTab     state={state} update={update} />}
@@ -459,6 +514,20 @@ export default function App() {
         {!IS_EMPLOYEE_VIEW && tab === "Reports"  && <ReportsTab  state={state} />}
         {!IS_EMPLOYEE_VIEW && tab === "Settings" && <SettingsTab state={state} update={update} />}
       </div>
+      {/* Mobile bottom nav */}
+      {!IS_EMPLOYEE_VIEW && (
+        <nav className="bottom-nav">
+          <div className="bottom-nav-inner">
+            {[["Home","⌂"],["Stock","▣"],["Sell","◈"],["History","≡"],["Reports","◎"],["Settings","⚙"]].map(([t,icon]) => (
+              <button key={t} className={`bn-item${tab===t?" active":""}`} onClick={() => setTab(t)}>
+                <span className="bn-icon">{icon}</span>
+                <span className="bn-lbl">{t}</span>
+                {tab===t && <span className="bn-dot"/>}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
@@ -484,21 +553,20 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
           <div className="section-eyebrow">Overview</div>
           <h1>Stock Dashboard</h1>
         </div>
-        <div style={{ fontSize: 11, color: "#b0a898" }}>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+        <div style={{ fontSize: 11, color: "#aaa" }}>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
       </div>
 
-      <div className="g3">
-        {[
-          { label: "Available Reels", val: available.length, unit: "in stock" },
-          { label: "Total Weight", val: (totalKg / 1000).toFixed(2), unit: "metric tons" },
-          ...(!isEmployee ? [{ label: "Total Sold", val: sold.length, unit: "reels dispatched" }] : []),
-        ].map(s => (
-          <div key={s.label} className="card" style={{ padding: "22px 24px" }}>
-            <div className="lbl">{s.label}</div>
-            <div className="stat-num">{s.val}</div>
-            <div className="serif-italic" style={{ fontSize: 13, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
-          </div>
-        ))}
+      <div className="g2">
+        <div className="card" style={{ padding: "20px 22px" }}>
+          <div className="lbl">Available Reels</div>
+          <div className="stat-num">{available.length}</div>
+          <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>reels in stock</div>
+        </div>
+        <div className="card" style={{ padding: "20px 22px" }}>
+          <div className="lbl">Total Weight</div>
+          <div className="stat-num">{fmt(Math.round(totalKg))} <span style={{ fontSize: 16, fontWeight: 500, color: "#aaa" }}>kg</span></div>
+          <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>{(totalKg / 1000).toFixed(2)} metric tons</div>
+        </div>
       </div>
 
       {lowItems.length > 0 && (
@@ -1747,6 +1815,10 @@ function SellTab({ state, update }) {
   const [customer, setCustomer] = useState("");
   const [date, setDate] = useState(today());
   const [transportBy, setTransportBy] = useState("");
+  const [chargeTransport, setChargeTransport] = useState(true);
+  const [transportCharge, setTransportCharge] = useState("");
+
+  const SELF_CASH = ["self", "cash"]; // transporters that never get charged to customer
 
   const suggestedChallan = (() => {
     const last = state.stock
@@ -1764,13 +1836,19 @@ function SellTab({ state, update }) {
   const [done, setDone] = useState(null);
   const [sellRates, setSellRates] = useState({}); // "bf|gsm" -> rate string
 
-  // Auto-load rates from customerData when customer changes
+  const isSelfCash = SELF_CASH.includes(transportBy.trim().toLowerCase());
+  const effectiveTransportCharge = (chargeTransport && !isSelfCash) ? (Number(transportCharge) || 0) : 0;
+
+  // Auto-load rates + transport charge from customerData when customer changes
   useEffect(() => {
     if (!customer || !state.customerData?.[customer]) { setSellRates({}); return; }
-    const hist = state.customerData[customer]?.rateHistory || {};
+    const cd = state.customerData[customer];
+    const hist = cd?.rateHistory || {};
     const rates = {};
     Object.entries(hist).forEach(([k, arr]) => { if (arr?.length) rates[k] = String(arr[arr.length - 1].rate); });
     setSellRates(rates);
+    // Pre-fill transport charge from customer setting
+    if (cd?.transportRate) setTransportCharge(String(cd.transportRate));
   }, [customer]);
 
   const available = state.stock.filter(r => !r.sold);
@@ -1793,6 +1871,13 @@ function SellTab({ state, update }) {
   // Grades present in selection
   const selGrades = [...new Set(selReels.map(r => `${r.bf}|${r.gsm}`))];
 
+  // GST preview for sell screen
+  const gumKgPreview = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const gumValPreview = gumSellRate ? gumKgPreview * Number(gumSellRate) : 0;
+  const previewCh = { reels: selReels.map(r => ({...r, soldRate: Number(sellRates[`${r.bf}|${r.gsm}`])||0})), gumSacks: (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).map(g => ({...g, soldRate: Number(gumSellRate)||0})), transportCharge: effectiveTransportCharge };
+  const previewGST = challanGST(previewCh);
+  const previewGrand = challanGrandTotal(previewCh);
+
   const noStockWarning = filter.size && available.filter(r => r.size === filter.size).length === 0
     ? `No ${filter.size}" reels in stock. Please check the size.` : null;
 
@@ -1805,7 +1890,7 @@ function SellTab({ state, update }) {
       s.stock = s.stock.map(r => {
         if (!selected.includes(r.id)) return r;
         const soldRate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
-        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined };
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined, transportCharge: effectiveTransportCharge || undefined };
       });
       if (!s.gumStock) s.gumStock = [];
       s.gumStock = s.gumStock.map(g => {
@@ -1828,7 +1913,7 @@ function SellTab({ state, update }) {
           s.customerData[customer].rateHistory[k] = [...hist, { rate: Number(rate), from: date }];
         }
       });
-      // Auto-create payment entry if customer has creditDays set
+      // Auto-create payment entry if customer has creditDays set — amount = grand total WITH GST
       const creditDays = s.customerData[customer]?.creditDays || null;
       if (creditDays && challanNo) {
         if (!s.payments) s.payments = [];
@@ -1836,24 +1921,24 @@ function SellTab({ state, update }) {
         if (!alreadyExists) {
           const reelList = s.stock.filter(r => selected.includes(r.id));
           const gumList = (s.gumStock||[]).filter(g => selectedGumIds.includes(g.id));
-          const chObj = { challanNo, date, customer, reels: reelList, gumSacks: gumList };
+          const chObj = { challanNo, date, customer, reels: reelList, gumSacks: gumList, transportCharge: effectiveTransportCharge };
           s.payments = [...s.payments, buildPaymentEntry(chObj, creditDays)];
         }
       }
     });
-    setDone({ count: ct, wt, customer, val: val + gumVal, gumCount: selectedGumIds.length, gumKg, gumVal });
+    setDone({ count: ct, wt, customer, val: val + gumVal, gumCount: selectedGumIds.length, gumKg, gumVal, grandTotal: previewGrand });
   };
 
   if (done) return (
     <div className="card fade-in" style={{ textAlign: "center", padding: 56 }}>
       <div style={{ fontSize: 44, marginBottom: 16 }}>✓</div>
       <div className="serif" style={{ fontSize: 28 }}>Sale Recorded</div>
-      <div style={{ fontSize: 13, color: "#8a8070", marginTop: 8 }}>
+      <div style={{ fontSize: 13, color: "#888", marginTop: 8 }}>
         {done.count > 0 && <div>{done.count} reels · {fmt(done.wt)} kg</div>}
         {done.gumCount > 0 && <div style={{ marginTop: 4 }}>{done.gumCount} gum sacks · {fmt(done.gumKg)} kg</div>}
-        <div style={{ marginTop: 4 }}>{done.val ? fmtRs(done.val) : "no rate set"} → {done.customer}</div>
+        <div style={{ marginTop: 4 }}>{done.grandTotal > 0 ? <><span style={{ color: "#aaa" }}>Ex-GST: {fmtRs(done.val || 0)}</span> · <strong>With GST: {fmtRs(done.grandTotal)}</strong></> : "no rate set"} → {done.customer}</div>
       </div>
-      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setSelectedGumIds([]); setGumSellRate(""); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); }}>Record Another Sale</button>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setSelectedGumIds([]); setGumSellRate(""); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); setTransportCharge(""); setChargeTransport(true); }}>Record Another Sale</button>
     </div>
   );
 
@@ -1878,14 +1963,39 @@ function SellTab({ state, update }) {
           <div><label className="lbl">Customer Name</label><CustomerInput value={customer} onChange={setCustomer} customers={state.customers || []} /></div>
           <div><label className="lbl">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
           <div>
-            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#8b6914", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
+            <label className="lbl">Challan No{suggestedChallan ? <span style={{ color: "#b8860b", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> · auto-suggested</span> : ""}</label>
             <input value={challanNo} onChange={e => setChallanNo(e.target.value)} placeholder="e.g. 313" />
           </div>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <label className="lbl">Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
-          <TransporterInput value={transportBy} onChange={setTransportBy} transporters={state.transporters || []} />
+        {/* Transport section */}
+        <div style={{ marginTop: 12 }}>
+          <label className="lbl">Transporter <span style={{ fontWeight: 400, color: "#aaa", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+          <TransporterInput value={transportBy} onChange={v => { setTransportBy(v); if (SELF_CASH.includes(v.trim().toLowerCase())) setChargeTransport(false); else setChargeTransport(true); }} transporters={state.transporters || []} />
         </div>
+        {/* Transport charge toggle — only show if not self/cash */}
+        {transportBy.trim() && !isSelfCash && (
+          <div style={{ marginTop: 10, background: "#f9f9f9", borderRadius: 10, padding: "12px 14px", border: "1.5px solid rgba(0,0,0,0.08)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: chargeTransport ? 10 : 0 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>Charge transport to customer?</div>
+                {!chargeTransport && <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>Saboon's trip still counted in his ledger</div>}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setChargeTransport(true)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: chargeTransport ? "#111" : "#ebebeb", color: chargeTransport ? "#fff" : "#666" }}>Yes</button>
+                <button onClick={() => setChargeTransport(false)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: !chargeTransport ? "#111" : "#ebebeb", color: !chargeTransport ? "#fff" : "#666" }}>No</button>
+              </div>
+            </div>
+            {chargeTransport && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <label className="lbl">Charge Amount (₹/trip)</label>
+                  <input type="number" inputMode="numeric" value={transportCharge} onChange={e => setTransportCharge(e.target.value)} placeholder="e.g. 300" />
+                </div>
+                {transportCharge && <div style={{ fontSize: 11, color: "#888", paddingTop: 18 }}>+ GST 18% = {fmtRs(Number(transportCharge) * 1.18)}</div>}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sell rates per grade */}
@@ -1966,24 +2076,34 @@ function SellTab({ state, update }) {
       )}
 
       {(selected.length > 0 || selectedGumIds.length > 0) && (
-        <div className="card" style={{ border: "1.5px solid #ddd8ce" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-            <div>
+        <div className="card" style={{ border: "1.5px solid rgba(0,0,0,0.12)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ flex: 1 }}>
               <div className="lbl">Selected for Sale</div>
-              {selected.length > 0 && <div className="serif" style={{ fontSize: 22, lineHeight: 1.1 }}>{selected.length} reels · {fmt(totalWt)} kg{totalValue > 0 ? ` · ${fmtRs(totalValue)}` : ""}</div>}
+              {selected.length > 0 && <div style={{ fontSize: 15, fontWeight: 700, color: "#111", lineHeight: 1.2 }}>{selected.length} reels · {fmt(totalWt)} kg{totalValue > 0 ? ` · ${fmtRs(totalValue)}` : ""}</div>}
               {selectedGumIds.length > 0 && (() => {
                 const gKg = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
                 const gVal = gumSellRate ? gKg * Number(gumSellRate) : 0;
-                return <div style={{ fontSize: 14, color: "#6a8a3a", fontWeight: 600, marginTop: 2 }}>{selectedGumIds.length} gum sacks · {fmt(gKg)} kg{gVal > 0 ? ` · ${fmtRs(gVal)}` : ""}</div>;
+                return <div style={{ fontSize: 13, color: "#4a7a2a", fontWeight: 600, marginTop: 2 }}>{selectedGumIds.length} gum sacks · {fmt(gKg)} kg{gVal > 0 ? ` · ${fmtRs(gVal)}` : ""}</div>;
               })()}
-              {(() => {
-                const gKg = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
-                const grandTotal = totalValue + (gumSellRate ? gKg * Number(gumSellRate) : 0);
-                return grandTotal > 0 && (selected.length > 0 && selectedGumIds.length > 0) ? <div style={{ fontSize: 16, color: "#1a1a1a", fontWeight: 800, marginTop: 4 }}>Grand Total: {fmtRs(grandTotal)}</div> : null;
-              })()}
-              {!customer && <div style={{ fontSize: 11, color: "#b83020", marginTop: 6 }}>Enter customer name to confirm.</div>}
+              {/* GST Breakup */}
+              {previewGrand > 0 && (
+                <div style={{ marginTop: 10, background: "#f9f9f9", borderRadius: 8, padding: "10px 12px" }}>
+                  {effectiveTransportCharge > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}><span style={{ color: "#888" }}>Items subtotal</span><span style={{ fontWeight: 600 }}>{fmtRs(challanItemTotal(previewCh))}</span></div>}
+                  {effectiveTransportCharge > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}><span style={{ color: "#888" }}>🚚 Transport</span><span style={{ fontWeight: 600 }}>{fmtRs(effectiveTransportCharge)}</span></div>}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}><span style={{ color: "#888" }}>Taxable total</span><span style={{ fontWeight: 600 }}>{fmtRs(challanTaxableAmount(previewCh))}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}><span style={{ color: "#22c55e" }}>CGST {previewCh.gumSacks?.length && !previewCh.reels?.length ? "2.5%" : "9%"}</span><span style={{ fontWeight: 600, color: "#22c55e" }}>+{fmtRs(previewGST.cgst)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 6 }}><span style={{ color: "#22c55e" }}>SGST {previewCh.gumSacks?.length && !previewCh.reels?.length ? "2.5%" : "9%"}</span><span style={{ fontWeight: 600, color: "#22c55e" }}>+{fmtRs(previewGST.sgst)}</span></div>
+                  <div style={{ borderTop: "1px solid #e8e8e8", paddingTop: 6, display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>Total (with GST)</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>{fmtRs(previewGrand)}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: "#aaa", textAlign: "right", marginTop: 2 }}>Rounded to nearest ₹1</div>
+                </div>
+              )}
+              {!customer && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 6 }}>Enter customer name to confirm.</div>}
             </div>
-            <button className="btn btn-dark" style={{ fontSize: 14, padding: "12px 28px" }} onClick={sell} disabled={!customer || (selected.length === 0 && selectedGumIds.length === 0)}>✓ Confirm Sale</button>
+            <button className="btn btn-dark" style={{ fontSize: 13, padding: "11px 22px" }} onClick={sell} disabled={!customer || (selected.length === 0 && selectedGumIds.length === 0)}>✓ Confirm Sale</button>
           </div>
         </div>
       )}
@@ -3104,11 +3224,15 @@ function HistoryTab({ state, update }) {
         return acc;
       }, {}));
 
-    // Deduplicate sales by challan
+    // Deduplicate sales by challan — include transportCharge from each reel's challan
     const challanMap = {};
     rawSales.forEach(t => {
       const k = t.challanNo || `${t.date}|${t.customer}`;
-      if (!challanMap[k]) challanMap[k] = { ...t, weight: 0 };
+      if (!challanMap[k]) {
+        // Get transportCharge from the actual reel record
+        const reelForCh = state.stock.find(r => r.sold && r.transportBy === selTransporter && (r.soldChallanNo === t.challanNo || (!r.soldChallanNo && `${r.soldDate}|${r.soldTo}` === k)));
+        challanMap[k] = { ...t, weight: 0, tripCharge: reelForCh?.transportCharge || 0, billedToCustomer: (reelForCh?.transportCharge || 0) > 0 };
+      }
       challanMap[k].weight += t.weight;
     });
     const allTrips = [...Object.values(challanMap), ...rawConversions]
@@ -3126,6 +3250,12 @@ function HistoryTab({ state, update }) {
     const tripsWeek = allTrips.filter(t => new Date(t.date) >= weekAgo).length;
     const tripsMonth = allTrips.filter(t => monthKey(t.date) === monthStr).length;
     const totalKgMonth = allTrips.filter(t => monthKey(t.date) === monthStr).reduce((s, t) => s + (t.weight || 0), 0);
+    // Cost calculations
+    const filteredSaleTrips = filtered.filter(t => t.type === "sale");
+    const totalPayable = filteredSaleTrips.reduce((s,t) => s + (t.tripCharge||0), 0);
+    const totalBilled = filteredSaleTrips.filter(t => t.billedToCustomer).reduce((s,t) => s + (t.tripCharge||0), 0);
+    const totalAbsorbed = filteredSaleTrips.filter(t => !t.billedToCustomer && t.tripCharge > 0).reduce((s,t) => s + (t.tripCharge||0), 0);
+    const monthPayable = allTrips.filter(t => t.type==="sale" && monthKey(t.date)===monthStr).reduce((s,t) => s + (t.tripCharge||0), 0);
 
     const uniqueTrips = filtered;
 
@@ -3145,14 +3275,42 @@ function HistoryTab({ state, update }) {
           ].map(s => (
             <div key={s.label} className="card" style={{ padding: "12px 14px", textAlign: "center" }}>
               <div className="lbl">{s.label}</div>
-              <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.1 }}>{s.val}</div>
-              <div style={{ fontSize: 10, color: "#9a9080", marginTop: 3 }}>{s.sub}</div>
+              <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>{s.val}</div>
+              <div style={{ fontSize: 10, color: "#aaa", marginTop: 3 }}>{s.sub}</div>
             </div>
           ))}
         </div>
+        {/* Cost summary for selected period */}
+        {totalPayable > 0 && (
+          <div className="card" style={{ padding: "14px 16px", background: "#111" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>
+              💰 Cost Summary {transporterMonth ? `— ${monthLabel(transporterMonth)}` : "— All time"}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: "#888" }}>Total payable to {selTransporter}</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{fmtRs(totalPayable)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+              <span style={{ color: "#666" }}>Recovered from customers</span>
+              <span style={{ color: "#22c55e", fontWeight: 600 }}>{fmtRs(totalBilled)}</span>
+            </div>
+            {totalAbsorbed > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <span style={{ color: "#666" }}>Absorbed (your cost)</span>
+                <span style={{ color: "#ef4444", fontWeight: 600 }}>{fmtRs(totalAbsorbed)}</span>
+              </div>
+            )}
+            {!transporterMonth && monthPayable > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #222", display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <span style={{ color: "#aaa" }}>This month payable</span>
+                <span style={{ color: "#D4A017", fontWeight: 700 }}>{fmtRs(monthPayable)}</span>
+              </div>
+            )}
+          </div>
+        )}
         {/* Month filter */}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "#9a9080" }}>Filter month:</span>
+          <span style={{ fontSize: 12, color: "#aaa" }}>Filter:</span>
           <button onClick={() => setTransporterMonth("")} className={`btn btn-sm ${!transporterMonth ? "btn-dark" : "btn-outline"}`}>All</button>
           {allMonths.map(m => (
             <button key={m} onClick={() => setTransporterMonth(m)} className={`btn btn-sm ${transporterMonth === m ? "btn-dark" : "btn-outline"}`}>{monthLabel(m)}</button>
@@ -3160,31 +3318,42 @@ function HistoryTab({ state, update }) {
         </div>
         {/* Trip ledger */}
         <div className="card-flat">
-          <div style={{ display: "flex", alignItems: "center", background: "#f5f0e8", borderBottom: "1px solid #e8e2d8", padding: "6px 12px" }}>
-            <div style={{ flex: 1, fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.07em" }}>Date · Type</div>
-            <div style={{ width: 80, fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.07em" }}>Details</div>
-            <div style={{ width: 60, fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "right" }}>Weight</div>
+          <div style={{ display: "flex", alignItems: "center", background: "#f5f5f5", borderBottom: "1px solid rgba(0,0,0,0.06)", padding: "6px 12px" }}>
+            <div style={{ flex: 1, fontSize: 9, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.07em" }}>Date · Type</div>
+            <div style={{ width: 90, fontSize: 9, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.07em" }}>Details</div>
+            <div style={{ width: 70, fontSize: 9, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "right" }}>Charge</div>
           </div>
           {uniqueTrips.length === 0 ? (
-            <div style={{ padding: 24, textAlign: "center", color: "#b0a898", fontSize: 13 }}>No trips in selected period.</div>
+            <div style={{ padding: 24, textAlign: "center", color: "#aaa", fontSize: 13 }}>No trips in selected period.</div>
           ) : uniqueTrips.map((t, i) => (
-            <div key={t.batchId || t.challanNo || i} style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderBottom: i < uniqueTrips.length - 1 ? "1px solid #f0ece4" : "none" }}>
+            <div key={t.batchId || t.challanNo || i} style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderBottom: i < uniqueTrips.length - 1 ? "1px solid rgba(0,0,0,0.04)" : "none" }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>{fmtDate(t.date)}</div>
-                <div style={{ fontSize: 10, color: "#9a9080", marginTop: 1 }}>
-                  {t.type === "sale" ? <span style={{ color: "#8b6914" }}>🏷 Sale{t.challanNo ? ` · CH ${t.challanNo}` : ""}</span> : <span style={{ color: "#2d6a4f" }}>🔄 Conversion{t.corrugator ? ` · ${t.corrugator}` : ""}</span>}
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>{fmtDate(t.date)}</div>
+                <div style={{ fontSize: 10, color: "#aaa", marginTop: 1 }}>
+                  {t.type === "sale"
+                    ? <span style={{ color: "#b8860b" }}>🏷 Sale{t.challanNo ? ` · CH #${t.challanNo}` : ""}</span>
+                    : <span style={{ color: "#2d6a4f" }}>🔄 Conversion{t.corrugator ? ` · ${t.corrugator}` : ""}</span>}
                 </div>
               </div>
-              <div style={{ width: 80, fontSize: 12, color: "#6a6050", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ width: 90, fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {t.type === "sale" ? (t.customer || "—") : (t.corrugator || "—")}
               </div>
-              <div style={{ width: 60, textAlign: "right", fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(t.weight))} <span style={{ fontSize: 9, fontWeight: 400, color: "#9a9080" }}>kg</span></div>
+              <div style={{ width: 70, textAlign: "right" }}>
+                {t.type === "sale" && t.tripCharge > 0 ? (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{fmtRs(t.tripCharge)}</div>
+                    <div style={{ fontSize: 8, color: t.billedToCustomer ? "#22c55e" : "#ef4444", fontWeight: 600 }}>{t.billedToCustomer ? "billed ✓" : "absorbed"}</div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: "#aaa" }}>{fmt(Math.round(t.weight||0))} kg</div>
+                )}
+              </div>
             </div>
           ))}
           {uniqueTrips.length > 0 && (
-            <div style={{ padding: "10px 12px", background: "#f5f0e8", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: "#6a6050" }}>
+            <div style={{ padding: "10px 12px", background: "#f5f5f5", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: "#666" }}>
               <span>{uniqueTrips.length} trip{uniqueTrips.length !== 1 ? "s" : ""} {transporterMonth ? `in ${monthLabel(transporterMonth)}` : ""}</span>
-              <span>{fmt(Math.round(uniqueTrips.reduce((s, t) => s + (t.weight || 0), 0)))} kg</span>
+              {totalPayable > 0 && <span style={{ color: "#111" }}>Payable: {fmtRs(totalPayable)}</span>}
             </div>
           )}
         </div>
@@ -3284,16 +3453,88 @@ function HistoryTab({ state, update }) {
     if (invoiceCustFilter) sorted = sorted.filter(p => p.customer === invoiceCustFilter);
     if (invoiceSearch) {
       const q = invoiceSearch.toLowerCase();
-      sorted = sorted.filter(p => p.customer?.toLowerCase().includes(q) || p.challanNo?.toLowerCase().includes(q));
+      sorted = sorted.filter(p => p.customer?.toLowerCase().includes(q) || String(p.challanNo||"").toLowerCase().includes(q));
+    }
+    // Overdue time filters
+    const [overdueTimeFilter, setOverdueTimeFilter] = React.useState("all");
+    if (invoiceListFilter === "overdue" && overdueTimeFilter !== "all") {
+      if (overdueTimeFilter === "0-30") sorted = sorted.filter(p => Math.abs(daysDiff(p.dueDate)) <= 30);
+      else if (overdueTimeFilter === "30-60") sorted = sorted.filter(p => Math.abs(daysDiff(p.dueDate)) > 30 && Math.abs(daysDiff(p.dueDate)) <= 60);
+      else if (overdueTimeFilter === "60+") sorted = sorted.filter(p => Math.abs(daysDiff(p.dueDate)) > 60);
     }
     const total = sorted.reduce((s, p) => s + (p.amount || 0), 0);
+
+    const exportOverduePDF = () => {
+      const dateStr = new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" });
+      const byCustomer = {};
+      sorted.forEach(p => { if (!byCustomer[p.customer]) byCustomer[p.customer] = []; byCustomer[p.customer].push(p); });
+      const rows = Object.entries(byCustomer).map(([cust, invs]) => {
+        const custTotal = invs.reduce((s,p) => s + (p.amount||0), 0);
+        const invoiceRows = invs.map(p => `
+          <tr>
+            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px">CH #${p.challanNo||"—"}</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px">${fmtDate(p.challanDate)}</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px">${fmtDate(p.dueDate)}</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px;color:#c62828">${Math.abs(daysDiff(p.dueDate))}d overdue</td>
+            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700">${fmtRs(p.amount||0)}</td>
+          </tr>`).join("");
+        return `
+          <div style="page-break-inside:avoid;margin-bottom:24px">
+            <div style="font-size:14px;font-weight:700;color:#111;margin-bottom:6px;padding:8px 10px;background:#f5f5f5;border-radius:4px">${cust}</div>
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr style="background:#111;color:#fff">
+                <th style="padding:6px 10px;font-size:10px;text-align:left">Challan</th>
+                <th style="padding:6px 10px;font-size:10px;text-align:left">Invoice Date</th>
+                <th style="padding:6px 10px;font-size:10px;text-align:left">Due Date</th>
+                <th style="padding:6px 10px;font-size:10px;text-align:left">Status</th>
+                <th style="padding:6px 10px;font-size:10px;text-align:right">Amount</th>
+              </tr></thead>
+              <tbody>${invoiceRows}</tbody>
+              <tfoot><tr style="background:#f9f9f9">
+                <td colspan="4" style="padding:6px 10px;font-size:11px;font-weight:700;border:1px solid #ddd">Total Overdue</td>
+                <td style="padding:6px 10px;font-size:12px;font-weight:800;text-align:right;border:1px solid #ddd;color:#c62828">${fmtRs(custTotal)}</td>
+              </tr></tfoot>
+            </table>
+          </div>`;
+      }).join("");
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Overdues ${dateStr}</title>
+        <style>body{font-family:Arial,sans-serif;padding:32px;color:#111}@media print{@page{margin:20mm}}</style></head>
+        <body>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid #111">
+            <div><div style="font-size:22px;font-weight:800">SK Traders</div><div style="font-size:13px;color:#666;margin-top:2px">KraftTrack — Overdue Report</div></div>
+            <div style="text-align:right"><div style="font-size:12px;color:#666">Generated on</div><div style="font-size:14px;font-weight:700">${dateStr}</div></div>
+          </div>
+          <div style="margin-bottom:20px;padding:10px 14px;background:#fce4ec;border-radius:6px;display:flex;justify-content:space-between">
+            <span style="font-size:13px;font-weight:700;color:#c62828">${sorted.length} overdue invoices across ${Object.keys(byCustomer).length} customers</span>
+            <span style="font-size:14px;font-weight:800;color:#c62828">${fmtRs(total)}</span>
+          </div>
+          ${rows}
+        </body></html>`;
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `Overdues_${new Date().toISOString().slice(0,10)}.html`;
+      a.click(); URL.revokeObjectURL(url);
+    };
+
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }} className="fade-in">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>← Back</button>
           <div><div className="section-eyebrow">Customers</div><h2>{titleMap[invoiceListFilter] || "Invoices"}</h2></div>
+          {invoiceListFilter === "overdue" && (
+            <button className="btn btn-dark btn-sm" style={{ marginLeft: "auto" }} onClick={exportOverduePDF}>⬇ Export PDF</button>
+          )}
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{sorted.length} invoice{sorted.length !== 1 ? "s" : ""} · {fmtRs(total)}</div>
+        {/* Overdue time filters */}
+        {invoiceListFilter === "overdue" && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[["all","All time"],["0-30","0–30d"],["30-60","30–60d"],["60+","60d+"]].map(([v,l]) => (
+              <button key={v} onClick={() => setOverdueTimeFilter(v)} className={`btn btn-sm ${overdueTimeFilter===v?"btn-dark":"btn-outline"}`}>{l}</button>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#111" }}>{sorted.length} invoice{sorted.length !== 1 ? "s" : ""} · {fmtRs(total)}</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} placeholder="Search customer / challan no…" style={{ flex: 1, minWidth: 180 }} />
           <select value={invoiceCustFilter} onChange={e => setInvoiceCustFilter(e.target.value)} style={{ minWidth: 150 }}>
@@ -3303,7 +3544,7 @@ function HistoryTab({ state, update }) {
         </div>
         {sorted.length === 0 ? (
           <div className="card" style={{ textAlign: "center", padding: 40 }}>
-            <span className="serif-italic" style={{ fontSize: 17, color: "#b0a898" }}>Nothing here.</span>
+            <span style={{ fontSize: 17, color: "#aaa", fontStyle: "italic" }}>Nothing here.</span>
           </div>
         ) : (
           <div className="card-flat">
@@ -3313,18 +3554,23 @@ function HistoryTab({ state, update }) {
               return (
                 <div key={p.id}
                   onClick={() => { setSelCustomer(p.customer); setCustView("customerDetail"); setFilterCustomer(p.customer); setSearch(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); }}
-                  style={{ padding: "13px 16px", borderBottom: i < sorted.length - 1 ? "1px solid #e8eef8" : "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
-                  onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
+                  style={{ padding: "0", borderBottom: i < sorted.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none", cursor: "pointer", display: "flex", alignItems: "stretch" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#fafafa"}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {p.customer || "—"}{p.challanNo ? <span style={{ fontWeight: 400, color: "#9a9080" }}> · CH {p.challanNo}</span> : ""}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#9a9080", marginTop: 2 }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)}</div>
+                  {/* Challan No block — prominent */}
+                  <div style={{ flexShrink:0, background: p.challanNo ? "#111" : "#e0e0e0", width:52, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"8px 4px", gap:1 }}>
+                    <div style={{ fontSize:7, color:"#666", textTransform:"uppercase", letterSpacing:"0.06em" }}>CH</div>
+                    <div style={{ fontSize:14, fontWeight:800, color: p.challanNo ? "#fff" : "#bbb", lineHeight:1.1, textAlign:"center" }}>{p.challanNo||"—"}</div>
                   </div>
-                  <span style={{ fontSize: 10, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 7px", fontWeight: 600, flexShrink: 0 }}>{badge.label}</span>
-                  <div style={{ fontWeight: 700, fontSize: 13, flexShrink: 0, minWidth: 60, textAlign: "right" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
-                  <div style={{ color: "#c8b89a", fontSize: 16 }}>›</div>
+                  <div style={{ flex: 1, minWidth: 0, padding: "10px 12px" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color:"#111" }}>{p.customer || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{fmtDate(p.challanDate)} · Due {fmtDate(p.dueDate)}</div>
+                  </div>
+                  <div style={{ padding:"10px 10px", display:"flex", flexDirection:"column", alignItems:"flex-end", justifyContent:"center", gap:4 }}>
+                    <span style={{ fontSize: 10, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 7px", fontWeight: 700 }}>{badge.label}</span>
+                    <div style={{ fontWeight: 800, fontSize: 13, color:"#111" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
+                  </div>
+                  <div style={{ color: "#ccc", fontSize: 16, display:"flex", alignItems:"center", paddingRight:8 }}>›</div>
                 </div>
               );
             })}
@@ -3531,7 +3777,29 @@ function HistoryTab({ state, update }) {
                       }} />
                     {custCreditDays && <span style={{ fontSize: 12, color: "#2d6a4f", fontWeight: 600 }}>✓ {custCreditDays}d set</span>}
                   </div>
-                  {custCreditDays && <div style={{ fontSize: 11, color: "#9a9080" }}>All existing and future challans use {custCreditDays}-day credit period by default. You can override per challan below.</div>}
+                  {custCreditDays && <div style={{ fontSize: 11, color: "#888" }}>All existing and future challans use {custCreditDays}-day credit period by default.</div>}
+                </div>
+
+                {/* Transport rate setting */}
+                <div className="card" style={{ padding: "14px 16px" }}>
+                  <h3 style={{ marginBottom: 10 }}>Default Transport Charge / Trip</h3>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input type="number" inputMode="numeric" placeholder="e.g. 300"
+                      defaultValue={state.customerData?.[selCustomer]?.transportRate || ""}
+                      style={{ width: 130 }}
+                      onBlur={e => {
+                        const v = Number(e.target.value);
+                        update(s => {
+                          if (!s.customerData) s.customerData = {};
+                          if (!s.customerData[selCustomer]) s.customerData[selCustomer] = { rateHistory: {} };
+                          s.customerData[selCustomer].transportRate = v || null;
+                        });
+                      }} />
+                    <span style={{ fontSize: 12, color: "#888" }}>₹ per trip — auto-fills on new challans</span>
+                  </div>
+                  {state.customerData?.[selCustomer]?.transportRate && (
+                    <div style={{ fontSize: 11, color: "#22c55e", marginTop: 6, fontWeight: 600 }}>✓ ₹{state.customerData[selCustomer].transportRate}/trip pre-set</div>
+                  )}
                 </div>
                 {/* Running balance */}
                 {custPayments.length > 0 && (
@@ -3886,49 +4154,59 @@ function HistoryTab({ state, update }) {
               if (!bySizeInChallan[r.size]) bySizeInChallan[r.size] = [];
               bySizeInChallan[r.size].push(r);
             });
+            const chForGST = { reels: ch.reels, gumSacks: ch.gumSacks||[], transportCharge: ch.reels[0]?.transportCharge || 0 };
+            const chGST = challanGST(chForGST);
+            const chGrand = challanGrandTotal(chForGST);
+            const chExGST = challanTaxableAmount(chForGST);
+            const pmtStatus = (() => { const p = payments.find(px => px.challanKey === key); return getPaymentStatus(p); })();
             return (
-              <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid #e8eef8" : "none" }}>
+              <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
                 {/* Challan header */}
                 <div onClick={() => !isEditing && setOpenChallan(prev => prev === key ? null : key)}
-                  style={{ padding: "0", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "stretch", transition: "background 0.12s", background: isOpen ? "#faf8f4" : "transparent" }}
-                  onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#faf8f4"; }}
+                  style={{ padding: "0", cursor: isEditing ? "default" : "pointer", display: "flex", alignItems: "stretch", transition: "background 0.12s", background: isOpen ? "#fafafa" : "transparent" }}
+                  onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#fafafa"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
                   {/* Challan No block */}
-                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#1a1a1a" : "#e8e2d8", width: 52, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
-                    <div style={{ fontSize: 8, color: ch.challanNo ? "#7a7060" : "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>CH</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: ch.challanNo ? "#fff" : "#b0a898", lineHeight: 1.1, fontFamily: "'DM Sans', sans-serif", textAlign: "center", wordBreak: "break-all" }}>{ch.challanNo || "—"}</div>
+                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#111" : "#e0e0e0", width: 52, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
+                    <div style={{ fontSize: 8, color: ch.challanNo ? "#777" : "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>CH</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: ch.challanNo ? "#fff" : "#bbb", lineHeight: 1.1, fontFamily: "'Inter', sans-serif", textAlign: "center", wordBreak: "break-all" }}>{ch.challanNo || "—"}</div>
+                    {pmtStatus === "overdue" && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#ef4444", marginTop: 3 }} />}
+                    {pmtStatus === "due-soon" && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#f97316", marginTop: 3 }} />}
+                    {pmtStatus === "paid" && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#22c55e", marginTop: 3 }} />}
                   </div>
                   {/* Customer + date — middle flex column */}
-                  <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, borderLeft: "1px solid #e8e2d8" }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, borderLeft: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {ch.customer || "—"}
-                      {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#edf5ff", border: "1px solid #b0ccee", borderRadius: 3, padding: "1px 5px", color: "#2a5a8a", marginLeft: 5 }}>Liner</span>}
+                      {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#e8f0ff", border: "1px solid #c0d4f5", borderRadius: 3, padding: "1px 5px", color: "#3a5a9a", marginLeft: 5 }}>Liner</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9a9080" }}>{fmtDate(ch.date)} · {ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}</div>
-                    {ch.reels[0]?.transportBy && <div style={{ fontSize: 10, color: "#6a6050" }}>🚚 {ch.reels[0].transportBy}</div>}
+                    <div style={{ fontSize: 11, color: "#aaa" }}>{fmtDate(ch.date)} · {ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}{gumSacks.length > 0 ? ` · ${gumSacks.length} gum` : ""}</div>
+                    {ch.reels[0]?.transportBy && <div style={{ fontSize: 10, color: "#888" }}>🚚 {ch.reels[0].transportBy}{ch.reels[0]?.transportCharge > 0 ? ` · ${fmtRs(ch.reels[0].transportCharge)}` : ""}</div>}
                   </div>
-                  {/* Weight + value — right column */}
-                  <div style={{ flexShrink: 0, width: 70, padding: "8px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 3, borderLeft: "1px solid #e8e2d8" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(Math.round(totalWt + totalGumWt))} <span style={{ fontSize: 10, fontWeight: 400, color: "#9a9080" }}>kg</span></div>
-                    {(() => {
-                      const v = ch.reels.reduce((s,r) => s+(Number(r.soldRate)||0)*Number(r.weight),0) + gumSacks.reduce((s,g) => s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0);
-                      return v > 0 ? <span style={{ fontSize: 11, color: "#8b6914", fontWeight: 700 }}>{fmtRs(v)}</span> : <span style={{ fontSize: 9, background: "#fef5e8", border: "1px solid #f0d5a0", borderRadius: 3, padding: "1px 4px", color: "#a05800", fontWeight: 600 }}>no rate</span>;
-                    })()}
+                  {/* Weight + value — right column (WITH GST in collapsed) */}
+                  <div style={{ flexShrink: 0, width: 78, padding: "8px 8px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 3, borderLeft: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{fmt(Math.round(totalWt + totalGumWt))} <span style={{ fontSize: 9, fontWeight: 400, color: "#aaa" }}>kg</span></div>
+                    {chGrand > 0 ? (
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#111" }}>{fmtRs(chGrand)}</div>
+                        <div style={{ fontSize: 8, color: "#aaa" }}>incl. GST</div>
+                      </div>
+                    ) : <span style={{ fontSize: 9, background: "#fff3e0", border: "1px solid #ffcc80", borderRadius: 3, padding: "1px 4px", color: "#e65100", fontWeight: 600 }}>no rate</span>}
                   </div>
                   {/* Expand arrow */}
-                  <div style={{ flexShrink: 0, width: 28, display: "flex", alignItems: "center", justifyContent: "center", color: "#c8b89a", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                  <div style={{ flexShrink: 0, width: 28, display: "flex", alignItems: "center", justifyContent: "center", color: "#ccc", fontSize: 16, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                 </div>
 
                 {/* Expanded content */}
                 {isOpen && (
-                  <div style={{ background: "#faf8f4", borderTop: "1px solid #dde8f5", padding: "14px 18px 18px 18px" }}>
+                  <div style={{ background: "#fafafa", borderTop: "1px solid rgba(0,0,0,0.06)", padding: "14px 16px 16px" }}>
 
                     {/* Edit form */}
                     {isEditing ? (
                       <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
                         {/* Header fields */}
-                        <div style={{ background: "#fff", border: "1.5px solid #8b6914", borderRadius: 10, padding: "14px 16px" }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: "#8b6914", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Challan Details</div>
+                        <div style={{ background: "#fff", border: "1.5px solid #b8860b", borderRadius: 10, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#b8860b", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Edit Challan Details</div>
                           <div className="g3" style={{ marginBottom: 10 }}>
                             <div>
                               <label className="lbl">Customer</label>
@@ -4134,16 +4412,60 @@ function HistoryTab({ state, update }) {
                             </div>
                           )}
 
-                          <div style={{ paddingTop: 10, borderTop: "1px solid #e8e2d8", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, flexWrap: "wrap", gap: 6 }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                              <span style={{ color: "#9a9080" }}>{ch.reels.length > 0 ? `${ch.reels.length} reels · ${fmt(Math.round(totalWt))} kg` : ""}{ch.reels.length > 0 && gumSacks.length > 0 ? " · " : ""}{gumSacks.length > 0 ? `${gumSacks.length} gum sacks · ${fmt(Math.round(totalGumWt))} kg` : ""}</span>
-                              {(ch.reels[0]?.transportBy || gumSacks[0]?.transportBy) && <span style={{ fontSize: 11, color: "#6a6050" }}>🚚 {ch.reels[0]?.transportBy || gumSacks[0]?.transportBy}</span>}
+                          <div style={{ paddingTop: 10, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+                            {/* GST Breakup */}
+                            {chExGST > 0 ? (
+                              <div style={{ background: "#f9f9f9", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                                {/* Item subtotal per grade */}
+                                {[...new Set(ch.reels.map(r => `${r.bf}|${r.gsm}`))].map(k => {
+                                  const [bf, gsm] = k.split("|");
+                                  const grReels = ch.reels.filter(r => r.bf===bf && r.gsm===gsm && r.productType!=="liner");
+                                  const linReels = ch.reels.filter(r => r.bf===bf && r.gsm===gsm && r.productType==="liner");
+                                  return (
+                                    <React.Fragment key={k}>
+                                      {grReels.length > 0 && (() => {
+                                        const kg = grReels.reduce((s,r)=>s+Number(r.weight),0);
+                                        const rate = grReels[0].soldRate||0;
+                                        const val = kg*rate;
+                                        return <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#888"}}>{bf} BF {gsm} GSM · {fmt(Math.round(kg))} kg @ {fmtRate(rate)}</span><span style={{fontWeight:600}}>{fmtRs(val)}</span></div>;
+                                      })()}
+                                      {linReels.length > 0 && (() => {
+                                        const kg = linReels.reduce((s,r)=>s+Number(r.weight),0);
+                                        const rate = linReels[0].soldRate||0;
+                                        const val = kg*rate;
+                                        return <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#888"}}>Liner {bf} BF {gsm} GSM · {fmt(Math.round(kg))} kg @ {fmtRate(rate)}</span><span style={{fontWeight:600}}>{fmtRs(val)}</span></div>;
+                                      })()}
+                                    </React.Fragment>
+                                  );
+                                })}
+                                {gumSacks.length > 0 && (() => {
+                                  const gkg = gumSacks.reduce((s,g)=>s+Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0);
+                                  const gval = gumSacks.reduce((s,g)=>s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0);
+                                  return <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#888"}}>Gum · {gumSacks.length} sacks · {fmt(Math.round(gkg))} kg</span><span style={{fontWeight:600}}>{fmtRs(gval)}</span></div>;
+                                })()}
+                                {chForGST.transportCharge > 0 && (
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}>
+                                    <span style={{color:"#888"}}>🚚 Transport ({ch.reels[0]?.transportBy||""})</span>
+                                    <span style={{fontWeight:600}}>{fmtRs(chForGST.transportCharge)}</span>
+                                  </div>
+                                )}
+                                <div style={{ borderTop:"1px solid #e8e8e8", marginTop:4, paddingTop:4 }}>
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{fontWeight:600,color:"#111"}}>Taxable Total</span><span style={{fontWeight:700}}>{fmtRs(chExGST)}</span></div>
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#22c55e"}}>CGST {chForGST.gumSacks?.length&&!chForGST.reels?.length?"2.5%":"9%"}</span><span style={{color:"#22c55e",fontWeight:600}}>+{fmtRs(chGST.cgst)}</span></div>
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#22c55e"}}>SGST {chForGST.gumSacks?.length&&!chForGST.reels?.length?"2.5%":"9%"}</span><span style={{color:"#22c55e",fontWeight:600}}>+{fmtRs(chGST.sgst)}</span></div>
+                                </div>
+                                <div style={{ borderTop:"1px solid #e8e8e8", marginTop:4, paddingTop:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                                  <span style={{ fontSize:12, fontWeight:700, color:"#111" }}>Total (with GST)</span>
+                                  <span style={{ fontSize:16, fontWeight:800, color:"#111" }}>{fmtRs(chGrand)}</span>
+                                </div>
+                                <div style={{ fontSize:8, color:"#aaa", textAlign:"right" }}>Rounded to nearest ₹1</div>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize:12, color:"#aaa", fontStyle:"italic", padding:"6px 0" }}>Add ₹/kg rates to see totals</div>
+                            )}
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:12, color:"#888" }}>
+                              <span>{ch.reels.length > 0 ? `${ch.reels.length} reels · ${fmt(Math.round(totalWt))} kg` : ""}{ch.reels.length > 0 && gumSacks.length > 0 ? " · " : ""}{gumSacks.length > 0 ? `${gumSacks.length} gum sacks · ${fmt(Math.round(totalGumWt))} kg` : ""}</span>
                             </div>
-                            <span style={{ fontWeight: 700, color: "#1a1a1a", fontSize: 15 }}>
-                              {(challanVal + gumSacks.reduce((s,g) => s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0)) > 0
-                                ? fmtRs(challanVal + gumSacks.reduce((s,g) => s+(Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0))
-                                : <span style={{ color: "#b0a898", fontStyle: "italic", fontSize: 12 }}>Add ₹/kg to see total</span>}
-                            </span>
                           </div>
                         </div>
                       );
@@ -4153,32 +4475,31 @@ function HistoryTab({ state, update }) {
                       const pmt = payments.find(p => p.challanKey === key);
                       const status = getPaymentStatus(pmt);
                       const badge = paymentStatusBadge(status, pmt?.dueDate);
-                      const challanVal2 = challanValue({ reels: ch.reels, gumSacks: ch.gumSacks||[] });
                       if (!pmt && !ch.customer) return null;
                       return (
-                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e8e2d8", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>💳 Payment</span>
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed rgba(0,0,0,0.08)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.06em" }}>💳 Payment</span>
                           {pmt ? (
                             <>
                               <span style={{ fontSize: 11, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 8px", fontWeight: 600 }}>{badge.label}</span>
-                              {pmt.dueDate && !pmt.paid && <span style={{ fontSize: 11, color: "#9a9080" }}>Due {fmtDate(pmt.dueDate)}</span>}
-                              {pmt.paid && pmt.paidDate && <span style={{ fontSize: 11, color: "#9a9080" }}>on {fmtDate(pmt.paidDate)}</span>}
-                              {pmt.creditDays && <span style={{ fontSize: 10, color: "#b0a898" }}>{pmt.creditDays}d credit</span>}
+                              {pmt.dueDate && !pmt.paid && <span style={{ fontSize: 11, color: "#aaa" }}>Due {fmtDate(pmt.dueDate)}</span>}
+                              {pmt.paid && pmt.paidDate && <span style={{ fontSize: 11, color: "#aaa" }}>on {fmtDate(pmt.paidDate)}</span>}
+                              {pmt.creditDays && <span style={{ fontSize: 10, color: "#bbb" }}>{pmt.creditDays}d credit</span>}
                               {!pmt.paid && (
                                 markingPaidId === pmt.id ? (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", background: "#fff", border: "1px solid #e5dece", borderRadius: 6, padding: "4px 6px" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "4px 6px" }}>
                                     <input type="date" value={markPaidDate} max={today()} onChange={e => setMarkPaidDate(e.target.value)} style={{ fontSize: 11, padding: "2px 5px", minWidth: 0, width: 122 }} />
-                                    <button onClick={() => confirmMarkPaid(pmt.id)} style={{ fontSize: 11, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>✓</button>
-                                    <button onClick={() => setMarkingPaidId(null)} style={{ background: "transparent", color: "#9a9080", border: "none", fontSize: 14, cursor: "pointer" }}>×</button>
+                                    <button onClick={() => confirmMarkPaid(pmt.id)} style={{ fontSize: 11, background: "#111", color: "#fff", border: "none", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>✓</button>
+                                    <button onClick={() => setMarkingPaidId(null)} style={{ background: "transparent", color: "#aaa", border: "none", fontSize: 14, cursor: "pointer" }}>×</button>
                                   </div>
                                 ) : (
                                   <button onClick={() => startMarkPaid(pmt.id)}
-                                    style={{ fontSize: 11, background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", cursor: "pointer", marginLeft: "auto" }}>✓ Mark Paid</button>
+                                    style={{ fontSize: 11, background: "#111", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", cursor: "pointer", marginLeft: "auto" }}>✓ Mark Paid</button>
                                 )
                               )}
                               {pmt.paid && (
                                 <button onClick={() => update(s => { const i = (s.payments||[]).findIndex(p => p.id === pmt.id); if (i !== -1) { s.payments[i].paid = false; s.payments[i].paidDate = null; } })}
-                                  style={{ fontSize: 10, background: "transparent", color: "#9a9080", border: "1px solid #ddd8ce", borderRadius: 5, padding: "2px 8px", cursor: "pointer", marginLeft: "auto" }}>Undo</button>
+                                  style={{ fontSize: 10, background: "transparent", color: "#aaa", border: "1px solid #e0e0e0", borderRadius: 5, padding: "2px 8px", cursor: "pointer", marginLeft: "auto" }}>Undo</button>
                               )}
                             </>
                           ) : (
@@ -4316,6 +4637,7 @@ function usePeriod(sold, extraForMonths = []) {
 
 function ReportsTab({ state }) {
   const [reportTab, setReportTab] = useState("reels"); // "reels" | "liner" | "gum" | "business"
+  const [showGST, setShowGST] = useState(false); // ex-GST default
   const allSold = state.stock.filter(r => r.sold && r.soldDate);
   const reelSold = allSold.filter(r => r.productType !== "liner");
   const linerSold = allSold.filter(r => r.productType === "liner");
@@ -4326,15 +4648,25 @@ function ReportsTab({ state }) {
       <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
       <div className="card" style={{ textAlign: "center", padding: 52 }}>
         <div style={{ fontSize: 36, marginBottom: 16 }}>📊</div>
-        <div className="serif-italic" style={{ fontSize: 18, color: "#b0a898" }}>No sales data yet.</div>
-        <div style={{ fontSize: 13, color: "#b0a898", marginTop: 8 }}>Record your first sale to see reports.</div>
+        <div style={{ fontSize: 18, color: "#aaa", fontStyle:"italic" }}>No sales data yet.</div>
+        <div style={{ fontSize: 13, color: "#aaa", marginTop: 8 }}>Record your first sale to see reports.</div>
       </div>
     </div>
   );
 
+  // GST multiplier helper for display
+  const gstMult = (isGum) => showGST ? (isGum ? 1.05 : 1.18) : 1;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
-      <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:10 }}>
+        <div><div className="section-eyebrow">Analytics</div><h2>Reports</h2></div>
+        {/* GST toggle */}
+        <div style={{ display:"flex", background:"#fff", borderRadius:8, padding:3, boxShadow:"var(--shadow-sm)" }}>
+          <button onClick={() => setShowGST(false)} style={{ padding:"6px 14px", borderRadius:6, border:"none", fontSize:11, fontWeight:700, cursor:"pointer", background:!showGST?"#111":"transparent", color:!showGST?"#fff":"#aaa" }}>Ex-GST</button>
+          <button onClick={() => setShowGST(true)} style={{ padding:"6px 14px", borderRadius:6, border:"none", fontSize:11, fontWeight:700, cursor:"pointer", background:showGST?"#111":"transparent", color:showGST?"#fff":"#aaa" }}>With GST</button>
+        </div>
+      </div>
       {/* Section switcher */}
       <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start", flexWrap: "wrap" }}>
         {[["reels","📦 Reels"],["liner","📄 Liner"],["gum","🪣 Gum"],["business","🏢 Full Business"],["payments","💳 Payments"]].map(([t, label]) => (
@@ -4412,39 +4744,41 @@ function ReelReport({ state, soldData }) {
   const gradeColTotals = {}; crossGradeLabels.forEach(gk => { gradeColTotals[gk] = { reels: 0, kg: 0 }; allSoldSizes.forEach(sz => { gradeColTotals[gk].reels += crossTab[sz]?.[gk]?.reels || 0; gradeColTotals[gk].kg += crossTab[sz]?.[gk]?.kg || 0; }); });
 
   const totalRevenue = periodSold.reduce((s, r) => s + (Number(r.soldRate) || 0) * Number(r.weight), 0);
+  const totalTransport = periodSold.reduce((s, r) => s + (Number(r.transportCharge) || 0), 0);
   const totalCost = periodSold.reduce((s, r) => s + landedRate(r) * Number(r.weight), 0);
   const totalProfit = totalRevenue - totalCost;
+  const displayRevenue = showGST ? Math.round((totalRevenue + totalTransport) * 1.18) : totalRevenue;
   const avgRatePerKg = totalKg > 0 ? totalRevenue / totalKg : 0;
   const topGrade = Object.entries(gradeMap).sort((a, b) => b[1].kg - a[1].kg)[0];
   const topSize = topSizes[0];
 
-  if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span className="serif-italic" style={{ fontSize: 16, color: "#b0a898" }}>No reel sales yet.</span></div>;
+  if (soldData.length === 0) return <div className="card" style={{ textAlign: "center", padding: 40 }}><span style={{ fontSize: 16, color: "#aaa", fontStyle:"italic" }}>No reel sales yet.</span></div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <PeriodBar />
       {/* KPI row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {[
           { label: "Reels Sold", val: periodSold.length, unit: "reels" },
           { label: "Total Weight", val: fmt(Math.round(totalKg)) + " kg", unit: (totalKg/1000).toFixed(2) + " tons" },
-          { label: "Revenue", val: totalRevenue > 0 ? fmtRs(totalRevenue) : "—", unit: "gross" },
-          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+          { label: showGST ? "Revenue (GST incl.)" : "Revenue (Ex-GST)", val: displayRevenue > 0 ? fmtRs(displayRevenue) : "—", unit: showGST ? "18% GST included" : "before GST" },
+          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2e7d32" : "#c62828" },
         ].map(k => (
           <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
             <div className="lbl">{k.label}</div>
-            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
-            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.2, color: k.color || "#111", letterSpacing:"-0.02em" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{k.unit}</div>}
           </div>
         ))}
       </div>
       {/* Key Insights */}
       {periodSold.length > 0 && (
-        <div className="card" style={{ background: "linear-gradient(135deg, #1a1a1a 0%, #2a2420 100%)", border: "none" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#7a7060", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 14 }}>⚡ Key Insights — {periodLabel}</div>
+        <div className="card" style={{ background: "#111", border: "none" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 14 }}>⚡ Key Insights — {periodLabel}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {avgRatePerKg > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
-              <span style={{ fontSize: 12, color: "#b0a898" }}>Avg selling rate</span>
+              <span style={{ fontSize: 12, color: "#888" }}>Avg selling rate</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "#e8c84a" }}>{fmtRate(avgRatePerKg)}/kg</span>
             </div>}
             {topGrade && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
@@ -4668,17 +5002,17 @@ function LinerReport({ state, soldData }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <PeriodBar />
       {/* KPI row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {[
           { label: "Liners Sold", val: periodSold.length, unit: "individual liners" },
           { label: "Total Weight", val: fmt(Math.round(totalKg)) + " kg", unit: (totalKg/1000).toFixed(2) + " tons" },
-          { label: "Revenue", val: totalRevenue > 0 ? fmtRs(totalRevenue) : "—", unit: "gross" },
-          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+          { label: showGST ? "Revenue (GST incl.)" : "Revenue (Ex-GST)", val: totalRevenue > 0 ? fmtRs(showGST ? Math.round(totalRevenue*1.18) : totalRevenue) : "—", unit: showGST ? "18% GST included" : "before GST" },
+          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2e7d32" : "#c62828" },
         ].map(k => (
           <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
             <div className="lbl">{k.label}</div>
-            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
-            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.2, color: k.color || "#111", letterSpacing:"-0.02em" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{k.unit}</div>}
           </div>
         ))}
       </div>
@@ -6365,17 +6699,17 @@ function GumReport({ state, soldData }) {
       </div>
 
       {/* KPI row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
         {[
           { label: "Sacks Sold", val: totalSacks, unit: "sacks" },
           { label: "Total Weight", val: fmt(Math.round(totalKg)) + " kg", unit: (totalKg/1000).toFixed(2) + " tons" },
-          { label: "Revenue", val: totalRevenue > 0 ? fmtRs(totalRevenue) : "—", unit: "gross" },
-          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2d6a4f" : "#b83020" },
+          { label: showGST ? "Revenue (GST incl.)" : "Revenue (Ex-GST)", val: totalRevenue > 0 ? fmtRs(showGST ? Math.round(totalRevenue*1.05) : totalRevenue) : "—", unit: showGST ? "5% GST included" : "before GST" },
+          { label: "Profit", val: totalProfit !== 0 ? fmtRs(totalProfit) : "—", unit: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) + "% margin" : "", color: totalProfit >= 0 ? "#2e7d32" : "#c62828" },
         ].map(k => (
           <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
             <div className="lbl">{k.label}</div>
-            <div className="serif" style={{ fontSize: 22, lineHeight: 1.2, color: k.color || "#1a1a1a" }}>{k.val}</div>
-            {k.unit && <div style={{ fontSize: 11, color: "#9a9080", marginTop: 3 }}>{k.unit}</div>}
+            <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.2, color: k.color || "#111", letterSpacing:"-0.02em" }}>{k.val}</div>
+            {k.unit && <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{k.unit}</div>}
           </div>
         ))}
       </div>
