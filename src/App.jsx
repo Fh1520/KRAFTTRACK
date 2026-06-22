@@ -4195,19 +4195,21 @@ function HistoryTab({ state, update }) {
 
             const isOpen = openChallan === key;
             const isEditing = editingChallan === key;
-            const totalWt = ch.reels.reduce((s, r) => s + Number(r.weight), 0);
+            const reels = ch.reels || [];
             const gumSacks = ch.gumSacks || [];
+            const totalWt = reels.reduce((s, r) => s + Number(r.weight||0), 0);
             const totalGumWt = gumSacks.reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
             const bySizeInChallan = {};
-            ch.reels.forEach(r => {
+            reels.forEach(r => {
               if (!bySizeInChallan[r.size]) bySizeInChallan[r.size] = [];
               bySizeInChallan[r.size].push(r);
             });
-            const chForGST = { reels: ch.reels, gumSacks: ch.gumSacks||[], transportCharge: ch.reels[0]?.transportCharge || 0 };
+            const chForGST = { reels, gumSacks, transportCharge: reels[0]?.transportCharge || 0 };
             const chGST = challanGST(chForGST);
             const chGrand = challanGrandTotal(chForGST);
             const chExGST = challanTaxableAmount(chForGST);
-            const pmtStatus = (() => { const p = payments.find(px => px.challanKey === key); return getPaymentStatus(p); })();
+            const pmtEntry = payments.find(px => px && px.challanKey === key);
+            const pmtStatus = getPaymentStatus(pmtEntry);
             return (
               <div key={key} style={{ borderBottom: idx < challans.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
                 {/* Challan header */}
@@ -4227,9 +4229,9 @@ function HistoryTab({ state, update }) {
                   <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, borderLeft: "1px solid rgba(0,0,0,0.06)" }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {ch.customer || "—"}
-                      {ch.reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#e8f0ff", border: "1px solid #c0d4f5", borderRadius: 3, padding: "1px 5px", color: "#3a5a9a", marginLeft: 5 }}>Liner</span>}
+                      {reels.some(r => r.productType === "liner") && <span style={{ fontSize: 9, background: "#e8f0ff", border: "1px solid #c0d4f5", borderRadius: 3, padding: "1px 5px", color: "#3a5a9a", marginLeft: 5 }}>Liner</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: "#aaa" }}>{fmtDate(ch.date)} · {ch.reels.length} {ch.reels.every(r => r.productType === "liner") ? "liner" : "reel"}{ch.reels.length !== 1 ? "s" : ""}{gumSacks.length > 0 ? ` · ${gumSacks.length} gum` : ""}</div>
+                    <div style={{ fontSize: 11, color: "#aaa" }}>{fmtDate(ch.date)} · {reels.length} {reels.every(r => r.productType === "liner") ? "liner" : "reel"}{reels.length !== 1 ? "s" : ""}{gumSacks.length > 0 ? ` · ${gumSacks.length} gum` : ""}</div>
                     {ch.reels[0]?.transportBy && <div style={{ fontSize: 10, color: "#888" }}>🚚 {ch.reels[0].transportBy}{ch.reels[0]?.transportCharge > 0 ? ` · ${fmtRs(ch.reels[0].transportCharge)}` : ""}</div>}
                   </div>
                   {/* Weight + value — right column (WITH GST in collapsed) */}
@@ -4283,12 +4285,12 @@ function HistoryTab({ state, update }) {
                         {/* Reels in challan — delete individual */}
                         <div style={{ background: "#fff", border: "1px solid #e8e2d8", borderRadius: 10, padding: "14px 16px" }}>
                           <div style={{ fontSize: 11, fontWeight: 600, color: "#6a6050", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                            Reels in This Challan — {ch.reels.length} reels
+                            Reels in This Challan — {reels.length} reels
                           </div>
-                          {ch.reels.length === 0
+                          {reels.length === 0
                             ? <div style={{ fontSize: 12, color: "#b0a898", fontStyle: "italic" }}>No reels — add some below.</div>
                             : <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                                {ch.reels.sort((a, b) => Number(a.size) - Number(b.size)).map(r => (
+                                {reels.sort((a, b) => Number(a.size) - Number(b.size)).map(r => (
                                   <div key={r.id} style={{ background: "#fef0ee", border: "1px solid #f0c0ba", borderRadius: 7, padding: "6px 10px", display: "flex", alignItems: "center", gap: 7 }}>
                                     <span className="serif" style={{ fontSize: 17 }}>{r.size}"</span>
                                     <span style={{ fontSize: 12, color: "#9a4030", fontWeight: 500 }}>{fmt(r.weight)} kg</span>
@@ -4341,7 +4343,7 @@ function HistoryTab({ state, update }) {
                                   {avail.map(r => (
                                     <button key={r.id}
                                       onClick={() => {
-                                        const customer = editForm.customer || ch.reels.find(x => x.soldTo)?.soldTo || ch.customer || "";
+                                        const customer = editForm.customer || reels.find(x => x.soldTo)?.soldTo || ch.customer || "";
                                         addReelToChallan(r.id, editForm.date || ch.date, customer, editForm.challanNo !== undefined ? editForm.challanNo : (ch.challanNo || ""));
                                       }}
                                       title={`Add ${r.size}" ${fmt(r.weight)} kg to this challan`}
@@ -4369,7 +4371,7 @@ function HistoryTab({ state, update }) {
                     {/* Sizes + weights grouped by grade with editable rate */}
                     {(() => {
                       const byGrade = {};
-                      ch.reels.forEach(r => {
+                      reels.forEach(r => {
                         const k = `${r.bf}|${r.gsm}`;
                         if (!byGrade[k]) byGrade[k] = { bf: r.bf, gsm: r.gsm, reels: [], rate: r.soldRate || "" };
                         byGrade[k].reels.push(r);
@@ -4466,10 +4468,10 @@ function HistoryTab({ state, update }) {
                             {chExGST > 0 ? (
                               <div style={{ background: "#f9f9f9", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
                                 {/* Item subtotal per grade */}
-                                {[...new Set(ch.reels.map(r => `${r.bf}|${r.gsm}`))].map(k => {
+                                {[...new Set(reels.map(r => `${r.bf}|${r.gsm}`))].map(k => {
                                   const [bf, gsm] = k.split("|");
-                                  const grReels = ch.reels.filter(r => r.bf===bf && r.gsm===gsm && r.productType!=="liner");
-                                  const linReels = ch.reels.filter(r => r.bf===bf && r.gsm===gsm && r.productType==="liner");
+                                  const grReels = reels.filter(r => r.bf===bf && r.gsm===gsm && r.productType!=="liner");
+                                  const linReels = reels.filter(r => r.bf===bf && r.gsm===gsm && r.productType==="liner");
                                   return (
                                     <React.Fragment key={k}>
                                       {grReels.length > 0 && (() => {
@@ -4494,7 +4496,7 @@ function HistoryTab({ state, update }) {
                                 })()}
                                 {chForGST.transportCharge > 0 && (
                                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}>
-                                    <span style={{color:"#888"}}>🚚 Transport ({ch.reels[0]?.transportBy||""})</span>
+                                    <span style={{color:"#888"}}>🚚 Transport ({reels[0]?.transportBy||""})</span>
                                     <span style={{fontWeight:600}}>{fmtRs(chForGST.transportCharge)}</span>
                                   </div>
                                 )}
@@ -4513,7 +4515,7 @@ function HistoryTab({ state, update }) {
                               <div style={{ fontSize:12, color:"#aaa", fontStyle:"italic", padding:"6px 0" }}>Add ₹/kg rates to see totals</div>
                             )}
                             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:12, color:"#888" }}>
-                              <span>{ch.reels.length > 0 ? `${ch.reels.length} reels · ${fmt(Math.round(totalWt))} kg` : ""}{ch.reels.length > 0 && gumSacks.length > 0 ? " · " : ""}{gumSacks.length > 0 ? `${gumSacks.length} gum sacks · ${fmt(Math.round(totalGumWt))} kg` : ""}</span>
+                              <span>{reels.length > 0 ? `${reels.length} reels · ${fmt(Math.round(totalWt))} kg` : ""}{reels.length > 0 && gumSacks.length > 0 ? " · " : ""}{gumSacks.length > 0 ? `${gumSacks.length} gum sacks · ${fmt(Math.round(totalGumWt))} kg` : ""}</span>
                             </div>
                           </div>
                         </div>
@@ -4521,7 +4523,7 @@ function HistoryTab({ state, update }) {
                     })()}
                     {/* Payment status strip */}
                     {(() => {
-                      const pmt = payments.find(p => p.challanKey === key);
+                      const pmt = pmtEntry;
                       const status = getPaymentStatus(pmt);
                       const badge = paymentStatusBadge(status, pmt?.dueDate);
                       if (!pmt && !ch.customer) return null;
@@ -4557,7 +4559,7 @@ function HistoryTab({ state, update }) {
                               update(s => {
                                 if (!s.payments) s.payments = [];
                                 if (!s.payments.some(p => p.challanKey === key)) {
-                                  s.payments.push(buildPaymentEntry({ challanNo: ch.challanNo, date: ch.date, customer: ch.customer, reels: ch.reels, gumSacks: ch.gumSacks||[] }, cd));
+                                  s.payments.push(buildPaymentEntry({ challanNo: ch.challanNo, date: ch.date, customer: ch.customer, reels: reels, gumSacks: gumSacks||[] }, cd));
                                 }
                               });
                             }} style={{ fontSize: 11, background: "transparent", color: "#8b6914", border: "1px solid #e5dece", borderRadius: 5, padding: "2px 10px", cursor: "pointer" }}>+ Track Payment</button>
