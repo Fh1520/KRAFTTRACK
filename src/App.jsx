@@ -427,9 +427,9 @@ export default function App() {
         /* ── bottom nav mobile ── */
         .bottom-nav{display:none;background:#fff;border-top:1px solid rgba(0,0,0,0.06);position:fixed;bottom:0;left:0;right:0;z-index:150;padding:6px 0 10px;box-shadow:0 -4px 20px rgba(0,0,0,0.06)}
         .bottom-nav-inner{display:flex;justify-content:space-around;max-width:500px;margin:0 auto}
-        .bn-item{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 8px;cursor:pointer;border:none;background:transparent;flex:1}
-        .bn-icon{font-size:18px;line-height:1}
-        .bn-lbl{font-size:8px;font-weight:500;color:#aaa;letter-spacing:0.02em}
+        .bn-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 2px;cursor:pointer;border:none;background:transparent;flex:1;min-width:0}
+        .bn-icon{font-size:22px;line-height:1}
+        .bn-lbl{font-size:9px;font-weight:500;color:#aaa;letter-spacing:0.02em;white-space:nowrap}
         .bn-item.active .bn-lbl{color:#111;font-weight:700}
         .bn-dot{width:4px;height:4px;border-radius:50%;background:#111;margin:1px auto 0}
         /* ── transport toggle ── */
@@ -454,9 +454,15 @@ export default function App() {
           .main-content{padding-bottom:72px!important}
         }
         @media(max-width:400px){.g2,.g3,.g4,.g5{grid-template-columns:1fr}}
+        /* ── hide top tabs on mobile, show bottom nav ── */
+        @media(max-width:640px){
+          .desktop-tabs{display:none!important}
+          .bottom-nav{display:block}
+          .main-content{padding-bottom:80px!important}
+        }
         @media(min-width:641px){
-          .brand-mobile{display:none!important}
           .bottom-nav{display:none!important}
+          .desktop-tabs{display:flex!important}
         }
       `}</style>
 
@@ -480,11 +486,11 @@ export default function App() {
             <KraftReelIcon size={26} />
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 13, fontWeight: 500, color: "#1a1a1a", whiteSpace: "nowrap" }}>SK Traders</span>
           </div>
-          <div style={{ display: "flex", overflowX: "auto", flex: 1, scrollbarWidth: "none" }}>
+          <div style={{ display: "flex", overflowX: "auto", flex: 1, scrollbarWidth: "none" }} className="desktop-tabs">
             {(IS_EMPLOYEE_VIEW ? EMPLOYEE_TABS : TABS).map(t => (
-              <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#8b6914" : "transparent"}`, padding: "13px 11px", fontSize: 12, fontWeight: tab === t ? 600 : 400, color: tab === t ? "#1a1a1a" : "#9a9080", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
+              <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", borderBottom: `2px solid ${tab === t ? "#b8860b" : "transparent"}`, padding: "13px 11px", fontSize: 12, fontWeight: tab === t ? 700 : 400, color: tab === t ? "#111" : "#aaa", whiteSpace: "nowrap", transition: "all 0.15s", letterSpacing: "0.01em" }}>{t}</button>
             ))}
-            {IS_EMPLOYEE_VIEW && <span style={{ fontSize: 9, color: "#b0a898", padding: "0 8px", alignSelf: "center", border: "1px solid #e8e2d8", borderRadius: 4, marginLeft: 4 }}>Stock View</span>}
+            {IS_EMPLOYEE_VIEW && <span style={{ fontSize: 9, color: "#aaa", padding: "0 8px", alignSelf: "center", border: "1px solid #e0e0e0", borderRadius: 4, marginLeft: 4 }}>Stock View</span>}
           </div>
           <div className="nav-sync-text" style={{ fontSize: 10, color: saveError ? "#b83020" : "#b0a898", paddingLeft: 14, whiteSpace: "nowrap", display: "flex", alignItems: "center", flexShrink: 0 }}>
             {syncing
@@ -518,7 +524,14 @@ export default function App() {
       {!IS_EMPLOYEE_VIEW && (
         <nav className="bottom-nav">
           <div className="bottom-nav-inner">
-            {[["Home","⌂"],["Stock","▣"],["Sell","◈"],["History","≡"],["Reports","◎"],["Settings","⚙"]].map(([t,icon]) => (
+            {[
+              ["Home","🏠"],
+              ["Stock","📦"],
+              ["Sell","🏷️"],
+              ["History","📋"],
+              ["Reports","📊"],
+              ["Settings","⚙️"]
+            ].map(([t, icon]) => (
               <button key={t} className={`bn-item${tab===t?" active":""}`} onClick={() => setTab(t)}>
                 <span className="bn-icon">{icon}</span>
                 <span className="bn-lbl">{t}</span>
@@ -4676,17 +4689,17 @@ function ReportsTab({ state }) {
           </button>
         ))}
       </div>
-      {reportTab === "reels" && <ReelReport state={state} soldData={reelSold} />}
-      {reportTab === "liner" && <LinerReport state={state} soldData={linerSold} />}
-      {reportTab === "gum" && <GumReport state={state} soldData={gumSold} />}
-      {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} gumSold={gumSold} allSold={allSold} />}
+      {reportTab === "reels" && <ReelReport state={state} soldData={reelSold} showGST={showGST} />}
+      {reportTab === "liner" && <LinerReport state={state} soldData={linerSold} showGST={showGST} />}
+      {reportTab === "gum" && <GumReport state={state} soldData={gumSold} showGST={showGST} />}
+      {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} gumSold={gumSold} allSold={allSold} showGST={showGST} />}
       {reportTab === "payments" && <PaymentsReport state={state} />}
     </div>
   );
 }
 
 // ─── REEL REPORT ─────────────────────────────────────────────────────────────
-function ReelReport({ state, soldData }) {
+function ReelReport({ state, soldData, showGST }) {
   const { periodSold, periodLabel, PeriodBar } = usePeriod(soldData);
   const sold = soldData;
   const allMonths = [...new Set(sold.map(r => monthKey(r.soldDate)))].sort().reverse();
@@ -4961,7 +4974,7 @@ function ReelReport({ state, soldData }) {
 }
 
 // ─── LINER REPORT ─────────────────────────────────────────────────────────────
-function LinerReport({ state, soldData }) {
+function LinerReport({ state, soldData, showGST }) {
   const { periodSold, periodLabel, PeriodBar } = usePeriod(soldData);
 
   const totalKg = periodSold.reduce((s, r) => s + Number(r.weight), 0);
@@ -5140,7 +5153,7 @@ function LinerReport({ state, soldData }) {
 }
 
 // ─── BUSINESS REPORT ─────────────────────────────────────────────────────────
-function BusinessReport({ state, reelSold, linerSold, gumSold, allSold }) {
+function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST }) {
   const { periodSold: periodAll, periodLabel, PeriodBar, periodFilter } = usePeriod(allSold, gumSold || []);
   const periodReels = periodAll.filter(r => r.productType !== "liner");
   const periodLiners = periodAll.filter(r => r.productType === "liner");
@@ -6617,7 +6630,7 @@ function GumSellTab({ state, update }) {
 }
 
 // ─── GUM REPORT ──────────────────────────────────────────────────────────────
-function GumReport({ state, soldData }) {
+function GumReport({ state, soldData, showGST }) {
   const variants = state.gumVariants || [];
   const allGumSold = soldData || [];
 
