@@ -105,7 +105,7 @@ function cgstRate(isGum) { return isGum ? 0.025 : 0.09; }
 function sgstRate(isGum) { return isGum ? 0.025 : 0.09; }
 // Challan totals — reels + transport = taxable, then GST on that
 function challanItemTotal(ch) {
-  const rv = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0);
+  const rv = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight||0), 0);
   const gv = (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0);
   return rv + gv;
 }
@@ -3501,53 +3501,69 @@ function HistoryTab({ state, update }) {
       const dateStr = new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" });
       const byCustomer = {};
       sorted.forEach(p => { if (!byCustomer[p.customer]) byCustomer[p.customer] = []; byCustomer[p.customer].push(p); });
+      const isMobile = /Mobi|Android/i.test(navigator.userAgent);
       const rows = Object.entries(byCustomer).map(([cust, invs]) => {
         const custTotal = invs.reduce((s,p) => s + (p.amount||0), 0);
         const invoiceRows = invs.map(p => `
           <tr>
-            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px">CH #${p.challanNo||"—"}</td>
-            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px">${fmtDate(p.challanDate)}</td>
-            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px">${fmtDate(p.dueDate)}</td>
-            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px;color:#c62828">${Math.abs(daysDiff(p.dueDate))}d overdue</td>
-            <td style="padding:6px 10px;border:1px solid #ddd;font-size:11px;text-align:right;font-weight:700">${fmtRs(p.amount||0)}</td>
+            <td><strong>CH #${p.challanNo||"—"}</strong></td>
+            <td>${fmtDate(p.challanDate)}</td>
+            <td>${fmtDate(p.dueDate)}</td>
+            <td style="color:#c62828">${Math.abs(daysDiff(p.dueDate))}d overdue</td>
+            <td style="text-align:right;font-weight:700">${fmtRs(p.amount||0)}</td>
           </tr>`).join("");
         return `
-          <div style="page-break-inside:avoid;margin-bottom:24px">
-            <div style="font-size:14px;font-weight:700;color:#111;margin-bottom:6px;padding:8px 10px;background:#f5f5f5;border-radius:4px">${cust}</div>
-            <table style="width:100%;border-collapse:collapse">
-              <thead><tr style="background:#111;color:#fff">
-                <th style="padding:6px 10px;font-size:10px;text-align:left">Challan</th>
-                <th style="padding:6px 10px;font-size:10px;text-align:left">Invoice Date</th>
-                <th style="padding:6px 10px;font-size:10px;text-align:left">Due Date</th>
-                <th style="padding:6px 10px;font-size:10px;text-align:left">Status</th>
-                <th style="padding:6px 10px;font-size:10px;text-align:right">Amount</th>
+          <div class="customer-block">
+            <div class="cust-name">${cust}</div>
+            <table>
+              <thead><tr>
+                <th>Challan</th><th>Invoice Date</th><th>Due Date</th><th>Status</th><th style="text-align:right">Amount</th>
               </tr></thead>
               <tbody>${invoiceRows}</tbody>
-              <tfoot><tr style="background:#f9f9f9">
-                <td colspan="4" style="padding:6px 10px;font-size:11px;font-weight:700;border:1px solid #ddd">Total Overdue</td>
-                <td style="padding:6px 10px;font-size:12px;font-weight:800;text-align:right;border:1px solid #ddd;color:#c62828">${fmtRs(custTotal)}</td>
+              <tfoot><tr class="total-row">
+                <td colspan="4">Total Overdue</td>
+                <td style="text-align:right">${fmtRs(custTotal)}</td>
               </tr></tfoot>
             </table>
           </div>`;
       }).join("");
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Overdues ${dateStr}</title>
-        <style>body{font-family:Arial,sans-serif;padding:32px;color:#111}@media print{@page{margin:20mm}}</style></head>
-        <body>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid #111">
-            <div><div style="font-size:22px;font-weight:800">SK Traders</div><div style="font-size:13px;color:#666;margin-top:2px">KraftTrack — Overdue Report</div></div>
-            <div style="text-align:right"><div style="font-size:12px;color:#666">Generated on</div><div style="font-size:14px;font-weight:700">${dateStr}</div></div>
-          </div>
-          <div style="margin-bottom:20px;padding:10px 14px;background:#fce4ec;border-radius:6px;display:flex;justify-content:space-between">
-            <span style="font-size:13px;font-weight:700;color:#c62828">${sorted.length} overdue invoices across ${Object.keys(byCustomer).length} customers</span>
-            <span style="font-size:14px;font-weight:800;color:#c62828">${fmtRs(total)}</span>
-          </div>
-          ${rows}
-        </body></html>`;
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url;
-      a.download = `Overdues_${new Date().toISOString().slice(0,10)}.html`;
-      a.click(); URL.revokeObjectURL(url);
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Overdues ${dateStr}</title>
+        <style>
+          @page { margin: 12mm; size: ${isMobile ? "A4 portrait" : "A4 landscape"}; }
+          * { box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; font-size: ${isMobile ? "11px" : "12px"}; color: #111; margin: 0; padding: 0; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #111; }
+          .company { font-size: ${isMobile ? "18px" : "22px"}; font-weight: 800; }
+          .sub { font-size: 11px; color: #666; margin-top: 2px; }
+          .date-label { font-size: 11px; color: #666; text-align: right; }
+          .date-val { font-size: 13px; font-weight: 700; }
+          .summary { display: flex; justify-content: space-between; align-items: center; background: #fce4ec; border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; }
+          .summary-text { font-size: 12px; font-weight: 700; color: #c62828; }
+          .summary-amt { font-size: 15px; font-weight: 800; color: #c62828; }
+          .customer-block { page-break-inside: avoid; margin-bottom: 20px; }
+          .cust-name { font-size: 13px; font-weight: 800; color: #111; background: #f5f5f5; padding: 6px 10px; border-radius: 4px; margin-bottom: 4px; }
+          table { width: 100%; border-collapse: collapse; font-size: ${isMobile ? "10px" : "11px"}; }
+          th { background: #111; color: #fff; padding: 5px 8px; text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+          td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+          .total-row td { font-weight: 800; background: #f9f9f9; font-size: ${isMobile ? "11px" : "12px"}; border-top: 1.5px solid #111; }
+          @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        </style>
+      </head><body>
+        <div class="header">
+          <div><div class="company">SK Traders</div><div class="sub">KraftTrack — Overdue Report</div></div>
+          <div><div class="date-label">Generated on</div><div class="date-val">${dateStr}</div></div>
+        </div>
+        <div class="summary">
+          <span class="summary-text">${sorted.length} overdue invoices · ${Object.keys(byCustomer).length} customers</span>
+          <span class="summary-amt">${fmtRs(total)}</span>
+        </div>
+        ${rows}
+        <script>window.onload=function(){window.print();}</script>
+      </body></html>`;
+      const w = window.open("", "_blank");
+      if (w) { w.document.write(html); w.document.close(); }
     };
 
     return (
@@ -5461,9 +5477,9 @@ function PaymentsReport({ state }) {
           <h3>Overdue Aging</h3>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {Object.entries(aging).map(([bucket, amt]) => (
-              <div key={bucket} style={{ flex: 1, minWidth: 70, background: amt > 0 ? "#fce4ec" : "#f5f5f5", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+              <div key={bucket} style={{ flex: 1, minWidth: 70, background: amt > 0 ? "#fce4ec" : "#f5f5f5", borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: amt > 0 ? "#c62828" : "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{bucket}d</div>
-                <div style={{ fontSize: 15, fontWeight: 800, color: amt > 0 ? "#c62828" : "#ccc" }}>{amt > 0 ? fmtRs(amt) : "—"}</div>
+                <div style={{ fontSize: amt > 0 && amt >= 100000 ? 11 : 14, fontWeight: 800, color: amt > 0 ? "#c62828" : "#ccc", lineHeight: 1.2, wordBreak: "break-all" }}>{amt > 0 ? fmtRs(amt) : "—"}</div>
               </div>
             ))}
           </div>
