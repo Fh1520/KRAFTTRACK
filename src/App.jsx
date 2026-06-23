@@ -424,8 +424,9 @@ export default function App() {
         .pressable{transition:transform 0.12s ease,background 0.12s ease}
         .pressable:active{transform:scale(0.97)}
         /* ── Animation 3: Challan expand ── */
-        .challan-expand{overflow:hidden;animation:expandDown 0.22s cubic-bezier(0.25,0.46,0.45,0.94)}
-        @keyframes expandDown{from{opacity:0;max-height:0;transform:translateY(-4px)}to{opacity:1;max-height:2000px;transform:translateY(0)}}
+        .challan-expand{animation:none}
+        .challan-expand-inner{overflow:hidden;transition:height 0.22s cubic-bezier(0.4,0,0.2,1);height:0}
+        .challan-expand-content{padding:14px 16px 16px}
         /* ── Animation 4: Bottom nav indicator ── */
         .bn-item{transition:transform 0.15s ease}
         .bn-item.active{transform:translateY(-2px)}
@@ -570,7 +571,42 @@ export default function App() {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-// ── Animated counter for home stats ──────────────────────────────────────────
+// ── Smooth challan expand ────────────────────────────────────────────────────
+function ChallanExpand({ open, children }) {
+  const innerRef = useRef(null);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const inner = innerRef.current;
+    if (!wrap || !inner) return;
+    if (open) {
+      const h = inner.getBoundingClientRect().height;
+      wrap.style.height = "0px";
+      wrap.style.opacity = "0";
+      requestAnimationFrame(() => {
+        wrap.style.height = h + "px";
+        wrap.style.opacity = "1";
+      });
+      const onEnd = () => { wrap.style.height = "auto"; };
+      wrap.addEventListener("transitionend", onEnd, { once: true });
+    } else {
+      const h = wrap.getBoundingClientRect().height;
+      wrap.style.height = h + "px";
+      requestAnimationFrame(() => {
+        wrap.style.height = "0px";
+        wrap.style.opacity = "0";
+      });
+    }
+  }, [open]);
+  return (
+    <div ref={wrapRef} style={{ overflow: "hidden", transition: "height 0.22s cubic-bezier(0.4,0,0.2,1), opacity 0.18s ease", height: 0, opacity: 0 }}>
+      <div ref={innerRef} style={{ background: "#fafafa", borderTop: "1px solid rgba(0,0,0,0.06)", padding: "14px 16px 16px" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function AnimatedNumber({ value, duration = 600, prefix = "", suffix = "" }) {
   const [display, setDisplay] = useState(0);
   const startRef = useRef(null);
@@ -4298,8 +4334,8 @@ function HistoryTab({ state, update }) {
                 </div>
 
                 {/* Expanded content */}
-                {isOpen && (
-                  <div className="challan-expand" style={{ background: "#fafafa", borderTop: "1px solid rgba(0,0,0,0.06)", padding: "14px 16px 16px" }}>
+                <ChallanExpand open={isOpen}>
+                  <div>
 
                     {/* Edit form */}
                     {isEditing ? (
@@ -4623,7 +4659,7 @@ function HistoryTab({ state, update }) {
                       );
                     })()}
                   </div>
-                )}
+                </ChallanExpand>
               </div>
             );
           })}
