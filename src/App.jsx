@@ -115,21 +115,28 @@ function challanReelTotal(ch) { return (ch.reels||[]).reduce((s,r) => s + (Numbe
 function challanGumTotal(ch)  { return (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0); }
 function challanItemTotal(ch)  { return challanReelTotal(ch) + challanGumTotal(ch); }
 function challanTransportCharge(ch) { return Number(ch.transportCharge) || 0; }
-// Taxable value for GST = goods only (transport is NOT taxed, matching Tally)
-function challanTaxableAmount(ch) { return challanItemTotal(ch); }
+// Taxable value for GST = goods + transport (transport taxed unless flagged off).
+// `transportTaxable === false` opts a challan OUT of taxing transport (matches the
+// Tally invoices where transport was entered as a non-GST charge). Default = taxed.
+function isTransportTaxed(ch) { return ch.transportTaxable !== false; }
+function challanTaxableAmount(ch) { return challanItemTotal(ch) + (isTransportTaxed(ch) ? challanTransportCharge(ch) : 0); }
 function challanGST(ch) {
-  // Each rate head taxed on its own goods value; transport excluded entirely.
   const reelTotal = challanReelTotal(ch);
   const gumTotal  = challanGumTotal(ch);
-  const reelGst = round2(reelTotal * 0.18);
-  const gumGst  = round2(gumTotal * 0.05);
-  // CGST / SGST are half of each rate, summed across heads then rounded to 2dp
-  const cgst = round2(reelTotal * 0.09 + gumTotal * 0.025);
-  const sgst = round2(reelTotal * 0.09 + gumTotal * 0.025);
+  const transport = challanTransportCharge(ch);
+  const taxT = isTransportTaxed(ch);
+  // Transport (when taxed) follows reel rate (18%) if reels present, else gum rate (5%)
+  const reelBase = reelTotal + (taxT && reelTotal > 0 ? transport : 0);
+  const gumBase  = gumTotal  + (taxT && reelTotal <= 0 ? transport : 0);
+  const reelGst = round2(reelBase * 0.18);
+  const gumGst  = round2(gumBase * 0.05);
+  // CGST / SGST = half of each rate, summed across heads, then rounded to 2dp
+  const cgst = round2(reelBase * 0.09 + gumBase * 0.025);
+  const sgst = round2(reelBase * 0.09 + gumBase * 0.025);
   const totalGst = round2(cgst + sgst);
-  return { reelGst, gumGst, transportGst: 0, totalGst, cgst, sgst };
+  return { reelGst, gumGst, transportGst: 0, totalGst, cgst, sgst, transportTaxed: taxT };
 }
-// Invoice total BEFORE round-off: goods (decimal) + transport (untaxed) + CGST + SGST
+// Invoice total BEFORE round-off: goods (decimal) + transport (always added) + CGST + SGST
 function challanPreRoundTotal(ch) {
   const g = challanGST(ch);
   return round2(challanItemTotal(ch) + challanTransportCharge(ch) + g.cgst + g.sgst);
@@ -1933,6 +1940,7 @@ function SellTab({ state, update }) {
   const [date, setDate] = useState(today());
   const [transportBy, setTransportBy] = useState("");
   const [chargeTransport, setChargeTransport] = useState(true);
+  const [transportTaxable, setTransportTaxable] = useState(true);
   const [transportCharge, setTransportCharge] = useState("");
 
   const SELF_CASH = ["self", "cash"]; // transporters that never get charged to customer
@@ -1991,7 +1999,7 @@ function SellTab({ state, update }) {
   // GST preview for sell screen
   const gumKgPreview = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
   const gumValPreview = gumSellRate ? gumKgPreview * Number(gumSellRate) : 0;
-  const previewCh = { reels: selReels.map(r => ({...r, soldRate: Number(sellRates[`${r.bf}|${r.gsm}`])||0})), gumSacks: (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).map(g => ({...g, soldRate: Number(gumSellRate)||0})), transportCharge: effectiveTransportCharge };
+  const previewCh = { reels: selReels.map(r => ({...r, soldRate: Number(sellRates[`${r.bf}|${r.gsm}`])||0})), gumSacks: (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).map(g => ({...g, soldRate: Number(gumSellRate)||0})), transportCharge: effectiveTransportCharge, transportTaxable };
   const previewGST = challanGST(previewCh);
   const previewGrand = challanGrandTotal(previewCh);
 
@@ -2007,7 +2015,7 @@ function SellTab({ state, update }) {
       s.stock = s.stock.map(r => {
         if (!selected.includes(r.id)) return r;
         const soldRate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
-        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined, transportCharge: effectiveTransportCharge || undefined };
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined, transportCharge: effectiveTransportCharge || undefined, transportTaxable: (effectiveTransportCharge && !transportTaxable) ? false : undefined };
       });
       if (!s.gumStock) s.gumStock = [];
       s.gumStock = s.gumStock.map(g => {
@@ -2038,7 +2046,7 @@ function SellTab({ state, update }) {
         if (!alreadyExists) {
           const reelList = s.stock.filter(r => selected.includes(r.id));
           const gumList = (s.gumStock||[]).filter(g => selectedGumIds.includes(g.id));
-          const chObj = { challanNo, date, customer, reels: reelList, gumSacks: gumList, transportCharge: effectiveTransportCharge };
+          const chObj = { challanNo, date, customer, reels: reelList, gumSacks: gumList, transportCharge: effectiveTransportCharge, transportTaxable };
           s.payments = [...s.payments, buildPaymentEntry(chObj, creditDays)];
         }
       }
@@ -2108,7 +2116,20 @@ function SellTab({ state, update }) {
                   <label className="lbl">Charge Amount (₹/trip)</label>
                   <input type="number" inputMode="numeric" value={transportCharge} onChange={e => setTransportCharge(e.target.value)} placeholder="e.g. 300" />
                 </div>
-                {transportCharge && <div style={{ fontSize: 11, color: "#888", paddingTop: 18 }}>+ GST 18% = {fmtRs(Number(transportCharge) * 1.18)}</div>}
+                {transportCharge && transportTaxable && <div style={{ fontSize: 11, color: "#888", paddingTop: 18 }}>+ GST 18% = {fmtRs(Number(transportCharge) * 1.18)}</div>}
+                {transportCharge && !transportTaxable && <div style={{ fontSize: 11, color: "#888", paddingTop: 18 }}>no GST on transport</div>}
+              </div>
+            )}
+            {chargeTransport && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 10, borderTop: "1px dashed rgba(0,0,0,0.10)" }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>Apply GST on transport?</div>
+                  <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>{transportTaxable ? "Taxed at 18% (default)" : "Added after GST — matches non-GST transport in Tally"}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setTransportTaxable(true)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: transportTaxable ? "#111" : "#ebebeb", color: transportTaxable ? "#fff" : "#666" }}>Yes</button>
+                  <button onClick={() => setTransportTaxable(false)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: !transportTaxable ? "#111" : "#ebebeb", color: !transportTaxable ? "#fff" : "#666" }}>No</button>
+                </div>
               </div>
             )}
           </div>
@@ -2250,7 +2271,7 @@ function SellTab({ state, update }) {
               </div>
               {effectiveTransportCharge > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
-                  <span style={{ color: "#888" }}>🚚 Transport ({transportBy}) <span style={{ fontSize: 9, color: "#bbb" }}>· no GST</span></span>
+                  <span style={{ color: "#888" }}>🚚 Transport ({transportBy}) <span style={{ fontSize: 9, color: "#bbb" }}>· {transportTaxable ? "in GST" : "no GST"}</span></span>
                   <span style={{ fontWeight: 600, color: "#111" }}>{fmtRs2(effectiveTransportCharge)}</span>
                 </div>
               )}
@@ -3244,17 +3265,18 @@ function HistoryTab({ state, update }) {
   const startEditChallan = (ch, key) => {
     setEditingChallan(key);
     const reelsArr = ch.reels || [];
-    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "", transportBy: reelsArr[0]?.transportBy || "", transportCharge: reelsArr[0]?.transportCharge || "" });
+    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "", transportBy: reelsArr[0]?.transportBy || "", transportCharge: reelsArr[0]?.transportCharge || "", transportTaxable: reelsArr[0]?.transportTaxable !== false });
     setOpenChallan(key);
   };
 
   const saveEditChallan = (ch, key) => {
     const ids = (ch.reels||[]).map(r => r.id);
     const charge = editForm.transportCharge !== "" ? Number(editForm.transportCharge) : undefined;
+    const tTaxable = (charge && editForm.transportTaxable === false) ? false : undefined;
     update(s => {
       s.stock = s.stock.map(r => {
         if (!ids.includes(r.id)) return r;
-        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined, transportCharge: charge };
+        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined, transportCharge: charge, transportTaxable: tTaxable };
       });
       if (s.gumStock) {
         s.gumStock = s.gumStock.map(g => {
@@ -4362,7 +4384,7 @@ function HistoryTab({ state, update }) {
               if (!bySizeInChallan[r.size]) bySizeInChallan[r.size] = [];
               bySizeInChallan[r.size].push(r);
             });
-            const chForGST = { reels, gumSacks, transportCharge: reels[0]?.transportCharge || 0 };
+            const chForGST = { reels, gumSacks, transportCharge: reels[0]?.transportCharge || 0, transportTaxable: reels[0]?.transportTaxable };
             const chGST = challanGST(chForGST);
             const chGrand = challanGrandTotal(chForGST);
             const chExGST = challanTaxableAmount(chForGST);
@@ -4440,6 +4462,18 @@ function HistoryTab({ state, update }) {
                             <div style={{ marginBottom: 10 }}>
                               <label className="lbl">Transport Charge (₹/trip) <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
                               <input type="number" inputMode="numeric" value={editForm.transportCharge || ""} onChange={e => setEditForm(f => ({ ...f, transportCharge: e.target.value }))} placeholder="e.g. 300" />
+                            </div>
+                          )}
+                          {editForm.transportBy && !["self","cash"].includes(editForm.transportBy.trim().toLowerCase()) && Number(editForm.transportCharge) > 0 && (
+                            <div style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9f9f9", borderRadius: 8, padding: "8px 12px", border: "1px solid rgba(0,0,0,0.08)" }}>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>GST on transport?</div>
+                                <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>{editForm.transportTaxable !== false ? "Taxed at 18%" : "Added after GST (no tax)"}</div>
+                              </div>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button className="pressable" onClick={() => setEditForm(f => ({ ...f, transportTaxable: true }))} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: editForm.transportTaxable !== false ? "#111" : "#ebebeb", color: editForm.transportTaxable !== false ? "#fff" : "#666" }}>Yes</button>
+                                <button className="pressable" onClick={() => setEditForm(f => ({ ...f, transportTaxable: false }))} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: editForm.transportTaxable === false ? "#111" : "#ebebeb", color: editForm.transportTaxable === false ? "#fff" : "#666" }}>No</button>
+                              </div>
                             </div>
                           )}
                           <div style={{ display: "flex", gap: 8 }}>
@@ -4662,7 +4696,7 @@ function HistoryTab({ state, update }) {
                                 })()}
                                 {chForGST.transportCharge > 0 && (
                                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}>
-                                    <span style={{color:"#888"}}>🚚 Transport ({reels[0]?.transportBy||""}) <span style={{fontSize:8,color:"#bbb"}}>· no GST</span></span>
+                                    <span style={{color:"#888"}}>🚚 Transport ({reels[0]?.transportBy||""}) <span style={{fontSize:8,color:"#bbb"}}>· {isTransportTaxed(chForGST) ? "in GST" : "no GST"}</span></span>
                                     <span style={{fontWeight:600}}>{fmtRs2(chForGST.transportCharge)}</span>
                                   </div>
                                 )}
