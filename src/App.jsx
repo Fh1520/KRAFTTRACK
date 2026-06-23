@@ -415,6 +415,7 @@ export default function App() {
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
         .fade-in{animation:fadeIn 0.2s ease}
         @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeSlideIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
         /* ── Animation 1: Tab transitions ── */
         .tab-content{animation:tabIn 0.18s cubic-bezier(0.25,0.46,0.45,0.94)}
         @keyframes tabIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
@@ -641,89 +642,96 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
     const k = `${r.bf}|${r.gsm}|${r.shade}`;
     if (bySpec[k]) { bySpec[k].reels++; bySpec[k].kg += Number(r.weight); bySpec[k].sizes[r.size]++; }
   });
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning ☀️" : hour < 17 ? "Good afternoon 🌤️" : "Good evening 🌙";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Greeting + heading */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
         <div>
-          <div className="section-eyebrow">Overview</div>
-          <h1>Stock Dashboard</h1>
+          <div className="section-eyebrow" style={{ animation: "fadeSlideIn 0.6s ease both" }}>{greeting}</div>
+          <h1 style={{ fontFamily: "'Inter', sans-serif", fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", animation: "fadeSlideIn 0.7s ease 0.05s both" }}>Stock Dashboard</h1>
         </div>
-        <div style={{ fontSize: 11, color: "#aaa" }}>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+        <div style={{ textAlign: "right", animation: "fadeSlideIn 0.7s ease 0.1s both" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>{new Date().toLocaleDateString("en-IN", { weekday: "long" })}</div>
+          <div style={{ fontSize: 11, color: "#aaa" }}>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</div>
+        </div>
       </div>
 
-      <div className="g2">
-        <div className="card" style={{ padding: "20px 22px" }}>
+      {/* Stat cards */}
+      <div className="g2" style={{ animation: "fadeSlideIn 0.7s ease 0.15s both" }}>
+        <div className="card" style={{ padding: "18px 20px" }}>
           <div className="lbl">Available Reels</div>
           <div className="stat-num"><AnimatedNumber value={available.length} /></div>
-          <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>reels in stock</div>
+          <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>reels in stock</div>
         </div>
-        <div className="card" style={{ padding: "20px 22px" }}>
+        <div className="card" style={{ padding: "18px 20px" }}>
           <div className="lbl">Total Weight</div>
-          <div className="stat-num"><AnimatedNumber value={Math.round(totalKg)} /> <span style={{ fontSize: 16, fontWeight: 500, color: "#aaa" }}>kg</span></div>
-          <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>{(totalKg / 1000).toFixed(2)} metric tons</div>
+          <div className="stat-num"><AnimatedNumber value={Math.round(totalKg / 1000 * 100) / 100} /> <span style={{ fontSize: 16, fontWeight: 500, color: "#aaa" }}>t</span></div>
+          <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>{fmt(Math.round(totalKg))} kg</div>
         </div>
       </div>
 
+      {/* Low stock alert */}
       {lowItems.length > 0 && (
-        <div className="low-alert">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <span style={{ fontSize: 15 }}>⚠️</span>
-            <span className="serif" style={{ fontSize: 18 }}>Critical Low Stock</span>
-            <span className="tag tag-orange" style={{ marginLeft: 4 }}>{lowItems.length} size{lowItems.length > 1 ? "s" : ""} — 2 or fewer left</span>
+        <div style={{ background: "#fff3e0", borderRadius: 14, padding: "13px 14px", animation: "fadeSlideIn 0.7s ease 0.25s both" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <span style={{ fontSize: 13 }}>⚠</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#e65100" }}>Critical Low Stock</span>
+            <span style={{ marginLeft: "auto", background: "rgba(230,81,0,0.12)", borderRadius: 20, padding: "2px 9px", fontSize: 9, fontWeight: 700, color: "#e65100" }}>{lowItems.length} size{lowItems.length > 1 ? "s" : ""}</span>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
             {lowItems.map(item => (
-              <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1px solid #f0d5a0", borderRadius: 10, padding: "10px 16px", display: "flex", gap: 14, alignItems: "center" }}>
-                <div>
-                  <div className="serif" style={{ fontSize: 26, lineHeight: 1, color: "#a05800" }}>{item.size}"</div>
-                  <div style={{ fontSize: 10, color: "#b0a898", marginTop: 3 }}>{item.bf} BF · {item.gsm} GSM</div>
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <div className="serif" style={{ fontSize: 30, lineHeight: 1, color: item.count === 0 ? "#b83020" : "#a05800" }}>{item.count}</div>
-                  <div style={{ fontSize: 10, color: "#b0a898" }}>left</div>
-                </div>
+              <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: item.count === 0 ? "#fce4ec" : "#fff", border: `1.5px solid ${item.count === 0 ? "#f48fb1" : "#ffcc80"}`, borderRadius: 12, padding: "9px 11px", textAlign: "center", minWidth: 66 }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: item.count === 0 ? "#c62828" : "#e65100", lineHeight: 1, letterSpacing: "-0.02em" }}>{item.size}"</div>
+                <div style={{ fontSize: 8, color: "#aaa", marginTop: 2 }}>{item.bf}BF · {item.gsm}G</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: item.count === 0 ? "#c62828" : "#e65100", marginTop: 3 }}>{item.count === 0 ? "out" : `${item.count} left`}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
+      {/* Moderate stock notice */}
       {moderateItems.length > 0 && (
-        <div className="moderate-alert">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <span style={{ fontSize: 14 }}>📦</span>
-            <span className="serif" style={{ fontSize: 16 }}>Moderate Stock Notice</span>
-            <span className="tag tag-blue" style={{ marginLeft: 4 }}>{moderateItems.length} size{moderateItems.length > 1 ? "s" : ""} — 3 reels remaining</span>
+        <div style={{ background: "#f0f4ff", border: "1px solid #c5cae9", borderRadius: 14, padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <span style={{ fontSize: 13 }}>📦</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#3a5a9a" }}>Moderate Stock Notice</span>
+            <span style={{ marginLeft: "auto", background: "rgba(58,90,154,0.1)", borderRadius: 20, padding: "2px 9px", fontSize: 9, fontWeight: 700, color: "#3a5a9a" }}>{moderateItems.length} size{moderateItems.length > 1 ? "s" : ""}</span>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
             {moderateItems.map(item => (
-              <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1px solid #c8b89a", borderRadius: 8, padding: "8px 14px" }}>
-                <div className="serif" style={{ fontSize: 20, color: "#2d2d2d" }}>{item.size}"</div>
-                <div style={{ fontSize: 10, color: "#8a8070" }}>{item.bf} BF · {item.gsm} GSM</div>
+              <div key={`${item.size}${item.bf}${item.gsm}`} style={{ background: "#fff", border: "1.5px solid #c5cae9", borderRadius: 12, padding: "9px 11px", textAlign: "center", minWidth: 66 }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#3a5a9a", lineHeight: 1, letterSpacing: "-0.02em" }}>{item.size}"</div>
+                <div style={{ fontSize: 8, color: "#aaa", marginTop: 2 }}>{item.bf}BF · {item.gsm}G</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#3a5a9a", marginTop: 3 }}>3 left</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {Object.values(bySpec).map(spec => (
-        <div key={`${spec.bf}${spec.gsm}${spec.shade}`} className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="serif" style={{ fontSize: 17, fontWeight: 500 }}>{spec.bf} BF · {spec.gsm} GSM</span>
-              <span className="tag" style={{ textTransform: "capitalize" }}>{spec.shade}</span>
+      {/* Grade cards */}
+      {Object.values(bySpec).map((spec, si) => (
+        <div key={`${spec.bf}${spec.gsm}${spec.shade}`} className="card" style={{ animation: `fadeSlideIn 0.7s ease ${0.3 + si * 0.05}s both` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#111", letterSpacing: "-0.01em" }}>{spec.bf} BF · {spec.gsm} GSM</div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+              <span style={{ background: "#f5f5f5", borderRadius: 20, padding: "3px 10px", fontSize: 9, fontWeight: 600, color: "#555", textTransform: "capitalize" }}>{spec.shade}</span>
+              <span style={{ fontSize: 10, color: "#aaa" }}>{spec.reels} reels · {fmt(Math.round(spec.kg))} kg</span>
             </div>
-            <div style={{ fontSize: 12, color: "#9a9080" }}>{spec.reels} reels · {fmt(spec.kg)} kg</div>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
             {Object.entries(spec.sizes).sort((a, b) => Number(a[0]) - Number(b[0])).map(([sz, cnt]) => (
               <div key={sz}
                 onClick={() => { setTab("Stock"); setStockNav({ size: sz }); }}
-                style={{ background: cnt === 0 ? "#fef0ee" : cnt <= 2 ? "#fef9ee" : cnt === 3 ? "#f4f8ff" : "#f4f7fb", border: `1px solid ${cnt === 0 ? "#f0c0ba" : cnt <= 2 ? "#f0d5a0" : cnt === 3 ? "#c8b89a" : "#e8e2d8"}`, borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s, box-shadow 0.1s" }}
-                onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.05)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.10)"; }}
-                onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}>
-                <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: cnt === 0 ? "#b83020" : cnt <= 2 ? "#a05800" : cnt === 3 ? "#2d2d2d" : "#1a1a1a" }}>{sz}"</div>
-                <div style={{ fontSize: 10, color: cnt === 0 ? "#c07060" : "#9a9080", marginTop: 4 }}>{cnt === 0 ? "out of stock" : `${cnt} reel${cnt !== 1 ? "s" : ""}`}</div>
+                style={{ background: cnt === 0 ? "#fce4ec" : cnt <= 2 ? "#fff3e0" : "#f9f9f9", border: `1.5px solid ${cnt === 0 ? "#f48fb1" : cnt <= 2 ? "#ffcc80" : "rgba(0,0,0,0.08)"}`, borderRadius: 12, padding: "8px 12px", textAlign: "center", minWidth: 60, cursor: "pointer", transition: "transform 0.12s" }}
+                onMouseEnter={e => e.currentTarget.style.transform = "scale(1.04)"}
+                onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.02em", color: cnt === 0 ? "#c62828" : cnt <= 2 ? "#e65100" : "#111" }}>{sz}"</div>
+                <div style={{ fontSize: 9, color: cnt === 0 ? "#c62828" : cnt <= 2 ? "#e65100" : "#aaa", marginTop: 3 }}>{cnt === 0 ? "out" : `${cnt} reel${cnt !== 1 ? "s" : ""}`}</div>
               </div>
             ))}
           </div>
@@ -733,8 +741,8 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
       {state.stock.length === 0 && (
         <div className="card" style={{ textAlign: "center", padding: 52 }}>
           <div style={{ fontSize: 40, marginBottom: 14 }}>📦</div>
-          <div className="serif-italic" style={{ fontSize: 22, color: "#9a9080" }}>No stock yet.</div>
-          <div style={{ fontSize: 13, color: "#b0a898", marginTop: 6 }}>Go to Stock → Add Inward to get started.</div>
+          <div style={{ fontSize: 20, color: "#aaa", fontStyle: "italic", fontFamily: "'Playfair Display', serif" }}>No stock yet.</div>
+          <div style={{ fontSize: 13, color: "#bbb", marginTop: 6 }}>Go to Stock → Add Inward to get started.</div>
         </div>
       )}
 
@@ -2038,12 +2046,12 @@ function SellTab({ state, update }) {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
-      {/* Product switcher */}
-      <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }} className="fade-in">
+      {/* Product switcher — pill tabs */}
+      <div style={{ display: "flex", background: "#fff", borderRadius: 25, padding: 3, gap: 2, alignSelf: "flex-start", boxShadow: "var(--shadow-sm)" }}>
         {[["reels","📦 Reels"], ["liner","📄 Liner"], ["gum","🪣 Gum"]].map(([t, label]) => (
           <button key={t} onClick={() => setProductTab(t)}
-            style={{ padding: "7px 18px", borderRadius: 7, border: "none", background: productTab === t ? "#fff" : "transparent", color: productTab === t ? "#1a1a1a" : "#8b6914", fontWeight: productTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: productTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
+            style={{ padding: "7px 18px", borderRadius: 20, border: "none", background: productTab === t ? "#111" : "transparent", color: productTab === t ? "#fff" : "#888", fontWeight: 600, fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}>
             {label}
           </button>
         ))}
@@ -2051,7 +2059,7 @@ function SellTab({ state, update }) {
       {productTab === "liner" && <LinerSellTab state={state} update={update} />}
       {productTab === "gum" && <GumSellTab state={state} update={update} />}
       {productTab === "reels" && <>
-      <div><div className="section-eyebrow">Dispatch</div><h2>Record a Sale</h2></div>
+      <div><div className="section-eyebrow">Dispatch</div><h2 style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, letterSpacing: "-0.03em" }}>Record a Sale</h2></div>
       <div className="card">
         <h3>Sale Details</h3>
         <div className="g3">
@@ -2171,34 +2179,85 @@ function SellTab({ state, update }) {
       )}
 
       {(selected.length > 0 || selectedGumIds.length > 0) && (
-        <div className="card" style={{ border: "1.5px solid rgba(0,0,0,0.12)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-            <div style={{ flex: 1 }}>
-              <div className="lbl">Selected for Sale</div>
-              {selected.length > 0 && <div style={{ fontSize: 15, fontWeight: 700, color: "#111", lineHeight: 1.2 }}>{selected.length} reels · {fmt(totalWt)} kg{totalValue > 0 ? ` · ${fmtRs(totalValue)}` : ""}</div>}
-              {selectedGumIds.length > 0 && (() => {
-                const gKg = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
-                const gVal = gumSellRate ? gKg * Number(gumSellRate) : 0;
-                return <div style={{ fontSize: 13, color: "#4a7a2a", fontWeight: 600, marginTop: 2 }}>{selectedGumIds.length} gum sacks · {fmt(gKg)} kg{gVal > 0 ? ` · ${fmtRs(gVal)}` : ""}</div>;
-              })()}
-              {/* GST Breakup */}
-              {previewGrand > 0 && (
-                <div style={{ marginTop: 10, background: "#f9f9f9", borderRadius: 8, padding: "10px 12px" }}>
-                  {effectiveTransportCharge > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}><span style={{ color: "#888" }}>Items subtotal</span><span style={{ fontWeight: 600 }}>{fmtRs(challanItemTotal(previewCh))}</span></div>}
-                  {effectiveTransportCharge > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}><span style={{ color: "#888" }}>🚚 Transport</span><span style={{ fontWeight: 600 }}>{fmtRs(effectiveTransportCharge)}</span></div>}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}><span style={{ color: "#888" }}>Taxable total</span><span style={{ fontWeight: 600 }}>{fmtRs(challanTaxableAmount(previewCh))}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}><span style={{ color: "#22c55e" }}>CGST {previewCh.gumSacks?.length && !previewCh.reels?.length ? "2.5%" : "9%"}</span><span style={{ fontWeight: 600, color: "#22c55e" }}>+{fmtRs(previewGST.cgst)}</span></div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 6 }}><span style={{ color: "#22c55e" }}>SGST {previewCh.gumSacks?.length && !previewCh.reels?.length ? "2.5%" : "9%"}</span><span style={{ fontWeight: 600, color: "#22c55e" }}>+{fmtRs(previewGST.sgst)}</span></div>
-                  <div style={{ borderTop: "1px solid #e8e8e8", paddingTop: 6, display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>Total (with GST)</span>
-                    <span style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>{fmtRs(previewGrand)}</span>
+        <div className="card" style={{ border: "1.5px solid rgba(0,0,0,0.12)", padding: 0, overflow: "hidden" }}>
+          {/* Selection breakdown header */}
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 10 }}>
+              Selected — {selected.length + selectedGumIds.length} item{selected.length + selectedGumIds.length !== 1 ? "s" : ""} · {fmt(Math.round(totalWt + (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s,g)=>s+Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0)))} kg
+            </div>
+            {/* Per-grade breakdown */}
+            {selGrades.map(k => {
+              const [bf, gsm] = k.split("|");
+              const gradeReels = selReels.filter(r => r.bf === bf && r.gsm === gsm);
+              const rate = Number(sellRates[k]) || 0;
+              const subtotal = gradeReels.reduce((s,r) => s + rate * Number(r.weight), 0);
+              return (
+                <div key={k} style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 6 }}>{bf} BF · {gsm} GSM {rate > 0 && <span style={{ color: "#b8860b" }}>@ {fmtRate(rate)}/kg</span>}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 4 }}>
+                    {gradeReels.map(r => (
+                      <div key={r.id} style={{ background: "#f5f5f5", borderRadius: 8, padding: "5px 9px", textAlign: "center" }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "#111", lineHeight: 1 }}>{r.size}"</div>
+                        <div style={{ fontSize: 9, color: "#aaa", marginTop: 2 }}>{fmt(r.weight)} kg</div>
+                      </div>
+                    ))}
                   </div>
-                  <div style={{ fontSize: 9, color: "#aaa", textAlign: "right", marginTop: 2 }}>Rounded to nearest ₹1</div>
+                  {subtotal > 0 && <div style={{ fontSize: 11, color: "#888", textAlign: "right" }}>subtotal: <strong style={{ color: "#111" }}>{fmtRs(subtotal)}</strong></div>}
+                </div>
+              );
+            })}
+            {selectedGumIds.length > 0 && (() => {
+              const gSacks = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id));
+              const gKg = gSacks.reduce((s,g)=>s+Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT),0);
+              const gVal = gumSellRate ? gKg * Number(gumSellRate) : 0;
+              return (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#4a8a3a", marginBottom: 4 }}>🪣 Gum {gumSellRate && <span>@ {fmtRate(Number(gumSellRate))}/kg</span>}</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{selectedGumIds.length} sacks · {fmt(Math.round(gKg))} kg{gVal > 0 ? ` · ${fmtRs(gVal)}` : ""}</div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Totals section */}
+          {previewGrand > 0 && (
+            <div style={{ padding: "12px 14px" }}>
+              {effectiveTransportCharge > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+                  <span style={{ color: "#888" }}>Items subtotal</span>
+                  <span style={{ fontWeight: 600, color: "#111" }}>{fmtRs(challanItemTotal(previewCh))}</span>
                 </div>
               )}
-              {!customer && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 6 }}>Enter customer name to confirm.</div>}
+              {effectiveTransportCharge > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+                  <span style={{ color: "#888" }}>🚚 Transport ({transportBy})</span>
+                  <span style={{ fontWeight: 600, color: "#111" }}>{fmtRs(effectiveTransportCharge)}</span>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+                <span style={{ color: "#888" }}>Taxable total</span>
+                <span style={{ fontWeight: 700, color: "#111" }}>{fmtRs(challanTaxableAmount(previewCh))}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                <span style={{ color: "#22c55e" }}>CGST {previewCh.gumSacks?.length && !previewCh.reels?.filter(r=>r.soldRate>0).length ? "2.5%" : "9%"}</span>
+                <span style={{ fontWeight: 600, color: "#22c55e" }}>+ {fmtRs(previewGST.cgst)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                <span style={{ color: "#22c55e" }}>SGST {previewCh.gumSacks?.length && !previewCh.reels?.filter(r=>r.soldRate>0).length ? "2.5%" : "9%"}</span>
+                <span style={{ fontWeight: 600, color: "#22c55e" }}>+ {fmtRs(previewGST.sgst)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTop: "1.5px solid #111" }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#111" }}>Total Payable</div>
+                  <div style={{ fontSize: 9, color: "#aaa", marginTop: 1 }}>incl. GST · rounded off</div>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#111", letterSpacing: "-0.03em" }}>{fmtRs(previewGrand)}</div>
+              </div>
             </div>
-            <button className="btn btn-dark" style={{ fontSize: 13, padding: "11px 22px" }} onClick={sell} disabled={!customer || (selected.length === 0 && selectedGumIds.length === 0)}>✓ Confirm Sale</button>
+          )}
+          {!customer && <div style={{ padding: "8px 14px", fontSize: 11, color: "#ef4444", borderTop: "1px solid rgba(0,0,0,0.06)" }}>Enter customer name to confirm.</div>}
+          <div style={{ padding: "0 14px 14px" }}>
+            <button className="btn btn-dark" style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 13, borderRadius: 11, background: "#b8860b", marginTop: previewGrand > 0 ? 0 : 10 }} onClick={sell} disabled={!customer || (selected.length === 0 && selectedGumIds.length === 0)}>✓ Confirm Sale</button>
           </div>
         </div>
       )}
@@ -3054,6 +3113,7 @@ function HistoryTab({ state, update }) {
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invoiceCustFilter, setInvoiceCustFilter] = useState("");
   const [overdueTimeFilter, setOverdueTimeFilter] = useState("all");
+  const [showHistoryFilters, setShowHistoryFilters] = useState(false);
   const [confirmDeleteCancelled, setConfirmDeleteCancelled] = useState(null);
 
   const startMarkPaid = (id) => { setMarkingPaidId(id); setMarkPaidDate(today()); };
@@ -4177,69 +4237,72 @@ function HistoryTab({ state, update }) {
         </div>
       ) : (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div><div className="section-eyebrow">Records</div><h2>Sales History</h2></div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-outline btn-sm" onClick={() => setCustView("transporters")}>🚚 Transport</button>
-            <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")} style={{ position: "relative" }}>
+          <div><div className="section-eyebrow">Records</div><h2 style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, letterSpacing: "-0.03em" }}>Sales History</h2></div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn-outline btn-sm" style={{ borderRadius: 20 }} onClick={() => setCustView("transporters")}>🚚 Transport</button>
+            <button className="btn btn-outline btn-sm" style={{ borderRadius: 20, position: "relative" }} onClick={() => setCustView("customers")}>
               👥 Customers
-              {hasOverdues && <span style={{ position: "absolute", top: -4, right: -4, width: 9, height: 9, background: "#b83020", borderRadius: "50%", border: "2px solid #fff", display: "block" }} />}
+              {hasOverdues && <span style={{ position: "absolute", top: -3, right: -3, width: 8, height: 8, background: "#c62828", borderRadius: "50%", border: "2px solid #f4f4f2" }} />}
             </button>
           </div>
         </div>
       )}
       {/* Overdue banner */}
       {hasOverdues && !overduesDismissed && (
-        <div style={{ background: "#fef0ee", border: "1px solid #f0c0ba", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14 }}>🔴</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#b83020" }}>{overduePayments.length} overdue challan{overduePayments.length !== 1 ? "s" : ""}</span>
-            {overdueAmount > 0 && <span style={{ fontSize: 12, color: "#b83020" }}>· {fmtRs(overdueAmount)} pending</span>}
-            <button onClick={() => setCustView("customers")} style={{ fontSize: 11, color: "#b83020", background: "transparent", border: "1px solid #f0c0ba", borderRadius: 5, padding: "2px 8px", cursor: "pointer", marginLeft: 4 }}>View →</button>
+        <div style={{ background: "#fce4ec", borderRadius: 10, padding: "9px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 13 }}>🔴</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#c62828" }}>{overduePayments.length}</span>
+            <span style={{ fontSize: 11, color: "#c62828" }}>overdue</span>
+            {overdueAmount > 0 && <span style={{ fontSize: 10, color: "#c62828", background: "rgba(198,40,40,0.1)", borderRadius: 20, padding: "2px 8px", fontWeight: 700 }}>{fmtRs(overdueAmount)}</span>}
+            <button onClick={() => setCustView("customers")} style={{ fontSize: 10, color: "#c62828", background: "transparent", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline", marginLeft: 2 }}>View →</button>
           </div>
-          <button onClick={() => setOverduesDismissed(true)} style={{ background: "transparent", border: "none", color: "#c08070", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>×</button>
+          <button onClick={() => setOverduesDismissed(true)} style={{ background: "transparent", border: "none", color: "#e9a0a0", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>×</button>
         </div>
       )}
-      {/* Filter bar */}
-      <div className="card" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ flex: 2, minWidth: 160 }}>
-            <label className="lbl">Customer</label>
-            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}>
-              <option value="">All Customers</option>
-              {allChallanCustomers.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div style={{ flex: 1, minWidth: 120 }}>
-            <label className="lbl">Grade</label>
-            <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)}>
-              <option value="">All</option>
-              {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
-            </select>
-          </div>
-          <div style={{ flex: 1, minWidth: 100 }}>
-            <label className="lbl">Size</label>
-            <select value={filterSize} onChange={e => setFilterSize(e.target.value)}>
-              <option value="">All</option>
-              {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
-            </select>
-          </div>
-          <div style={{ flex: 1, minWidth: 110 }}>
-            <label className="lbl">Month</label>
-            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
-              <option value="">All Time</option>
-              {allChallanMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-            </select>
-          </div>
+      {/* Month pills + search + filter button */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none", paddingBottom: 2 }}>
+          <button onClick={() => setFilterMonth("")} style={{ background: !filterMonth ? "#111" : "#fff", color: !filterMonth ? "#fff" : "#666", border: "none", borderRadius: 20, padding: "5px 14px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", boxShadow: "0 1px 3px rgba(0,0,0,0.08)", cursor: "pointer", flexShrink: 0 }}>All Time</button>
+          {allChallanMonths.map(m => (
+            <button key={m} onClick={() => setFilterMonth(m)} style={{ background: filterMonth === m ? "#111" : "#fff", color: filterMonth === m ? "#fff" : "#666", border: "none", borderRadius: 20, padding: "5px 14px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", boxShadow: "0 1px 3px rgba(0,0,0,0.08)", cursor: "pointer", flexShrink: 0 }}>{monthLabel(m)}</button>
+          ))}
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, challan no, size…" style={{ flex: 1 }} />
-          {hasFilters && (
-            <button className="btn btn-outline btn-sm" onClick={() => { setFilterCustomer(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); setSearch(""); }}>
-              Clear
-            </button>
-          )}
-          <span style={{ fontSize: 12, color: "#9a9080", whiteSpace: "nowrap" }}>{challans.length} challan{challans.length !== 1 ? "s" : ""}</span>
+        <div style={{ display: "flex", gap: 7 }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search customer, challan, size…" style={{ flex: 1 }} />
+          <button onClick={() => setShowHistoryFilters(s => !s)} style={{ background: (filterCustomer || filterGrade || filterSize) ? "#111" : "#fff", color: (filterCustomer || filterGrade || filterSize) ? "#fff" : "#666", border: "none", borderRadius: 10, padding: "0 14px", fontSize: 11, fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
+            ⚙ Filters {(filterCustomer || filterGrade || filterSize) && <span style={{ background: "#b8860b", color: "#fff", borderRadius: 20, width: 15, height: 15, fontSize: 8, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{[filterCustomer, filterGrade, filterSize].filter(Boolean).length}</span>}
+          </button>
         </div>
+        {showHistoryFilters && (
+          <div className="card" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="g3">
+              <div>
+                <label className="lbl">Customer</label>
+                <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}>
+                  <option value="">All Customers</option>
+                  {allChallanCustomers.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="lbl">Grade</label>
+                <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)}>
+                  <option value="">All</option>
+                  {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="lbl">Size</label>
+                <select value={filterSize} onChange={e => setFilterSize(e.target.value)}>
+                  <option value="">All</option>
+                  {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
+                </select>
+              </div>
+            </div>
+            {hasFilters && <button className="btn btn-outline btn-sm" style={{ alignSelf: "flex-start" }} onClick={() => { setFilterCustomer(""); setFilterSize(""); setFilterGrade(""); setFilterMonth(""); setSearch(""); }}>Clear all filters</button>}
+          </div>
+        )}
+        <span style={{ fontSize: 11, color: "#aaa" }}>{challans.length} challan{challans.length !== 1 ? "s" : ""}{filterMonth ? ` · ${monthLabel(filterMonth)}` : ""}</span>
       </div>
       {challans.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40 }}>
@@ -4247,13 +4310,6 @@ function HistoryTab({ state, update }) {
         </div>
       ) : (
         <div className="card-flat">
-          {/* Column header row */}
-          <div style={{ display: "flex", alignItems: "center", background: "#f5f0e8", borderBottom: "1px solid #e8e2d8" }}>
-            <div style={{ width: 52, flexShrink: 0, padding: "6px 4px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em" }}>CH#</div>
-            <div style={{ flex: 1, padding: "6px 10px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", borderLeft: "1px solid #e8e2d8" }}>Customer · Date</div>
-            <div style={{ flex: "0 0 auto", width: 70, padding: "6px 8px", fontSize: 9, fontWeight: 700, color: "#9a9080", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "right", borderLeft: "1px solid #e8e2d8" }}>Wt · Value</div>
-            <div style={{ width: 28, flexShrink: 0 }} />
-          </div>
           {challans.map((ch, idx) => {
             const key = ch.cancelled ? `__cancelled_${ch.cancelledMeta.id}` : (ch.challanNo || `__${ch.date}__${ch.customer}`);
 
@@ -4303,12 +4359,14 @@ function HistoryTab({ state, update }) {
                   onMouseEnter={e => { if (!isOpen && !isEditing) e.currentTarget.style.background = "#fafafa"; }}
                   onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = "transparent"; }}>
                   {/* Challan No block */}
-                  <div style={{ flexShrink: 0, background: ch.challanNo ? "#111" : "#e0e0e0", width: 52, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
-                    <div style={{ fontSize: 8, color: ch.challanNo ? "#777" : "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>CH</div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: ch.challanNo ? "#fff" : "#bbb", lineHeight: 1.1, fontFamily: "'Inter', sans-serif", textAlign: "center", wordBreak: "break-all" }}>{ch.challanNo || "—"}</div>
-                    {pmtStatus === "overdue" && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#ef4444", marginTop: 3 }} />}
-                    {pmtStatus === "due-soon" && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#f97316", marginTop: 3 }} />}
-                    {pmtStatus === "paid" && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#22c55e", marginTop: 3 }} />}
+                  <div style={{ flexShrink: 0, background: pmtStatus === "overdue" ? "#c62828" : pmtStatus === "due-soon" ? "#e65100" : pmtStatus === "paid" ? "#111" : ch.challanNo ? "#333" : "#e0e0e0", width: 52, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 4px", gap: 1 }}>
+                    <div style={{ fontSize: 8, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>CH</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", lineHeight: 1.1, fontFamily: "'Inter', sans-serif", textAlign: "center", wordBreak: "break-all" }}>{ch.challanNo || "—"}</div>
+                    <div style={{ fontSize: 10, lineHeight: 1, marginTop: 2 }}>
+                      {pmtStatus === "overdue" && "🔴"}
+                      {pmtStatus === "due-soon" && "⏰"}
+                      {pmtStatus === "paid" && "✓"}
+                    </div>
                   </div>
                   {/* Customer + date — middle flex column */}
                   <div style={{ flex: 1, minWidth: 0, padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, borderLeft: "1px solid rgba(0,0,0,0.06)" }}>
