@@ -415,6 +415,30 @@ export default function App() {
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
         .fade-in{animation:fadeIn 0.2s ease}
         @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+        /* ── Animation 1: Tab transitions ── */
+        .tab-content{animation:tabIn 0.18s cubic-bezier(0.25,0.46,0.45,0.94)}
+        @keyframes tabIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        /* ── Animation 2: Card press ── */
+        .card{transition:transform 0.12s ease,box-shadow 0.12s ease}
+        .card:active{transform:scale(0.985);box-shadow:0 1px 4px rgba(0,0,0,0.06)!important}
+        .pressable{transition:transform 0.12s ease,background 0.12s ease}
+        .pressable:active{transform:scale(0.97)}
+        /* ── Animation 3: Challan expand ── */
+        .challan-expand{overflow:hidden;animation:expandDown 0.22s cubic-bezier(0.25,0.46,0.45,0.94)}
+        @keyframes expandDown{from{opacity:0;max-height:0;transform:translateY(-4px)}to{opacity:1;max-height:2000px;transform:translateY(0)}}
+        /* ── Animation 4: Bottom nav indicator ── */
+        .bn-item{transition:transform 0.15s ease}
+        .bn-item.active{transform:translateY(-2px)}
+        .bn-item.active .bn-icon{animation:bounceIn 0.25s cubic-bezier(0.34,1.56,0.64,1)}
+        @keyframes bounceIn{from{transform:scale(0.7)}to{transform:scale(1)}}
+        .bn-dot{animation:dotPop 0.2s cubic-bezier(0.34,1.56,0.64,1)}
+        @keyframes dotPop{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+        /* ── Animation 5: Stat count-up (via JS) ── */
+        .stat-animated{transition:opacity 0.3s ease}
+        /* ── Button press ── */
+        .btn{transition:all 0.15s ease}
+        .btn:active{transform:scale(0.96)!important}
+        .btn-dark:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.15)}
         .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
         .modal{background:#fff;border-radius:18px;padding:24px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,0.18)}
         /* ── GST breakup ── */
@@ -512,7 +536,7 @@ export default function App() {
         </div>
       </nav>
 
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in main-content">
+      <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 14px" }} className="fade-in tab-content main-content">
         {tab === "Home"     && <HomeTab     state={state} setTab={setTab} setStockNav={setStockNav} lowItems={lowItems} moderateItems={moderateItems} totalKg={totalKg} available={available} isEmployee={IS_EMPLOYEE_VIEW} />}
         {tab === "Stock"    && <StockTab    state={state} update={update} stockNav={stockNav} clearStockNav={() => setStockNav(null)} isEmployee={IS_EMPLOYEE_VIEW} />}
         {!IS_EMPLOYEE_VIEW && tab === "Sell"     && <SellTab     state={state} update={update} />}
@@ -546,6 +570,28 @@ export default function App() {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
+// ── Animated counter for home stats ──────────────────────────────────────────
+function AnimatedNumber({ value, duration = 600, prefix = "", suffix = "" }) {
+  const [display, setDisplay] = useState(0);
+  const startRef = useRef(null);
+  const rafRef = useRef(null);
+  useEffect(() => {
+    const target = Number(value) || 0;
+    const start = performance.now();
+    const animate = (now) => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // Ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(eased * target));
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [value, duration]);
+  return <>{prefix}{Number(display).toLocaleString("en-IN")}{suffix}</>;
+}
+
 function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg, available, isEmployee }) {
   const sold = state.stock.filter(r => r.sold && r.productType !== "liner");
   const bySpec = {};
@@ -572,12 +618,12 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
       <div className="g2">
         <div className="card" style={{ padding: "20px 22px" }}>
           <div className="lbl">Available Reels</div>
-          <div className="stat-num">{available.length}</div>
+          <div className="stat-num"><AnimatedNumber value={available.length} /></div>
           <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>reels in stock</div>
         </div>
         <div className="card" style={{ padding: "20px 22px" }}>
           <div className="lbl">Total Weight</div>
-          <div className="stat-num">{fmt(Math.round(totalKg))} <span style={{ fontSize: 16, fontWeight: 500, color: "#aaa" }}>kg</span></div>
+          <div className="stat-num"><AnimatedNumber value={Math.round(totalKg)} /> <span style={{ fontSize: 16, fontWeight: 500, color: "#aaa" }}>kg</span></div>
           <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>{(totalKg / 1000).toFixed(2)} metric tons</div>
         </div>
       </div>
@@ -3084,25 +3130,28 @@ function HistoryTab({ state, update }) {
 
   const startEditChallan = (ch, key) => {
     setEditingChallan(key);
-    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "", transportBy: ch.reels[0]?.transportBy || "" });
+    const reelsArr = ch.reels || [];
+    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "", transportBy: reelsArr[0]?.transportBy || "", transportCharge: reelsArr[0]?.transportCharge || "" });
     setOpenChallan(key);
   };
 
   const saveEditChallan = (ch, key) => {
-    const ids = ch.reels.map(r => r.id);
+    const ids = (ch.reels||[]).map(r => r.id);
+    const charge = editForm.transportCharge !== "" ? Number(editForm.transportCharge) : undefined;
     update(s => {
       s.stock = s.stock.map(r => {
         if (!ids.includes(r.id)) return r;
-        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined };
+        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined, transportCharge: charge };
       });
-      // Also update gum sacks on same challan
       if (s.gumStock) {
         s.gumStock = s.gumStock.map(g => {
           if (g.soldChallanNo !== ch.challanNo && !(g.soldDate === ch.date && g.soldTo === ch.customer)) return g;
           return { ...g, transportBy: editForm.transportBy || undefined };
         });
       }
-      // Save new customer name if not known
+      if (editForm.transportBy?.trim() && !(s.transporters||[]).some(x=>x.trim().toLowerCase()===editForm.transportBy.trim().toLowerCase())) {
+        s.transporters = [...(s.transporters || []), editForm.transportBy.trim()].sort();
+      }
       if (editForm.customer.trim() && !(s.customers||[]).some(x=>x.trim().toLowerCase()===editForm.customer.trim().toLowerCase())) {
         s.customers = [...(s.customers || []), editForm.customer.trim()].sort();
       }
@@ -4250,7 +4299,7 @@ function HistoryTab({ state, update }) {
 
                 {/* Expanded content */}
                 {isOpen && (
-                  <div style={{ background: "#fafafa", borderTop: "1px solid rgba(0,0,0,0.06)", padding: "14px 16px 16px" }}>
+                  <div className="challan-expand" style={{ background: "#fafafa", borderTop: "1px solid rgba(0,0,0,0.06)", padding: "14px 16px 16px" }}>
 
                     {/* Edit form */}
                     {isEditing ? (
@@ -4273,9 +4322,15 @@ function HistoryTab({ state, update }) {
                             </div>
                           </div>
                           <div style={{ marginBottom: 10 }}>
-                            <label className="lbl">🚚 Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(add / edit)</span></label>
-                            <TransporterInput value={editForm.transportBy || ""} onChange={v => setEditForm(f => ({ ...f, transportBy: v }))} transporters={state.transporters || []} placeholder="Transporter / Tempo name" />
+                            <label className="lbl">🚚 Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+                            <TransporterInput value={editForm.transportBy || ""} onChange={v => setEditForm(f => ({ ...f, transportBy: v }))} transporters={state.transporters || []} placeholder="Transporter name" />
                           </div>
+                          {editForm.transportBy && !["self","cash"].includes(editForm.transportBy.trim().toLowerCase()) && (
+                            <div style={{ marginBottom: 10 }}>
+                              <label className="lbl">Transport Charge (₹/trip) <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+                              <input type="number" inputMode="numeric" value={editForm.transportCharge || ""} onChange={e => setEditForm(f => ({ ...f, transportCharge: e.target.value }))} placeholder="e.g. 300" />
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 8 }}>
                             <button className="btn btn-dark btn-sm" onClick={() => saveEditChallan(ch, key)}>✓ Save Header</button>
                             <button className="btn btn-outline btn-sm" onClick={() => setEditingChallan(null)}>Done</button>
