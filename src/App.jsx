@@ -69,6 +69,7 @@ function paymentStatusBadge(status, dueDate) {
 // GUM helpers
 const DEFAULT_GUM_SACK_WEIGHT = 25; // kg
 function fmtRs(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
+function fmtRs2(n) { return "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtRate(n) { if (!n && n !== 0) return ""; const v = Number(n); return "₹" + (Number.isInteger(v) ? v.toString() : v.toFixed(2)); }
 // Landed cost = paper cost + transport + warai per kg
 function landedRate(r) { return (Number(r.costRate)||0) + (Number(r.transportRate)||0) + (Number(r.waraiRate)||0); }
@@ -100,30 +101,43 @@ function monthLabel(k) { if (!k) return ""; const [y, m] = k.split("-"); return 
 
 // ─── GST HELPERS ──────────────────────────────────────────────────────────────
 // GST rates: reels/liner = 18% (CGST 9% + SGST 9%), gum = 5% (CGST 2.5% + SGST 2.5%)
+// Mirrors Tally Prime's voucher maths:
+//   • item value is kept in full decimal (e.g. 39,187.50) — never pre-rounded
+//   • GST is charged on the GOODS value only; transport is added AFTER GST (untaxed)
+//   • CGST and SGST are each rounded to 2 decimals (per tax head, like Tally)
+//   • the grand total is rounded off to the nearest ₹1 at the very end (Round Off line)
 function gstRate(isGum) { return isGum ? 0.05 : 0.18; }
 function cgstRate(isGum) { return isGum ? 0.025 : 0.09; }
 function sgstRate(isGum) { return isGum ? 0.025 : 0.09; }
-// Challan totals — reels + transport = taxable, then GST on that
-function challanItemTotal(ch) {
-  const rv = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight||0), 0);
-  const gv = (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0);
-  return rv + gv;
-}
+function round2(n) { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
+// Goods values (kept in decimal)
+function challanReelTotal(ch) { return (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight||0), 0); }
+function challanGumTotal(ch)  { return (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0); }
+function challanItemTotal(ch)  { return challanReelTotal(ch) + challanGumTotal(ch); }
 function challanTransportCharge(ch) { return Number(ch.transportCharge) || 0; }
-function challanTaxableAmount(ch) { return challanItemTotal(ch) + challanTransportCharge(ch); }
+// Taxable value for GST = goods only (transport is NOT taxed, matching Tally)
+function challanTaxableAmount(ch) { return challanItemTotal(ch); }
 function challanGST(ch) {
-  // Split by reels (18%) and gum (5%) — if mixed, each portion taxed at its rate
-  const reelTotal = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0);
-  const gumTotal = (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0);
-  const transport = challanTransportCharge(ch);
-  // Transport GST follows reel rate (18%) if reels present, gum rate if gum only
-  const transportGst = reelTotal > 0 ? transport * 0.18 : transport * 0.05;
-  const reelGst = reelTotal * 0.18;
-  const gumGst = gumTotal * 0.05;
-  const totalGst = reelGst + gumGst + transportGst;
-  return { reelGst, gumGst, transportGst, totalGst, cgst: totalGst/2, sgst: totalGst/2 };
+  // Each rate head taxed on its own goods value; transport excluded entirely.
+  const reelTotal = challanReelTotal(ch);
+  const gumTotal  = challanGumTotal(ch);
+  const reelGst = round2(reelTotal * 0.18);
+  const gumGst  = round2(gumTotal * 0.05);
+  // CGST / SGST are half of each rate, summed across heads then rounded to 2dp
+  const cgst = round2(reelTotal * 0.09 + gumTotal * 0.025);
+  const sgst = round2(reelTotal * 0.09 + gumTotal * 0.025);
+  const totalGst = round2(cgst + sgst);
+  return { reelGst, gumGst, transportGst: 0, totalGst, cgst, sgst };
 }
-function challanGrandTotal(ch) { return Math.round(challanTaxableAmount(ch) + challanGST(ch).totalGst); }
+// Invoice total BEFORE round-off: goods (decimal) + transport (untaxed) + CGST + SGST
+function challanPreRoundTotal(ch) {
+  const g = challanGST(ch);
+  return round2(challanItemTotal(ch) + challanTransportCharge(ch) + g.cgst + g.sgst);
+}
+// Final total, rounded to nearest ₹1 (Tally "Round Off")
+function challanGrandTotal(ch) { return Math.round(challanPreRoundTotal(ch)); }
+// The round-off adjustment shown on the invoice (can be + or −)
+function challanRoundOff(ch) { return round2(challanGrandTotal(ch) - challanPreRoundTotal(ch)); }
 // Updated challanValue — now returns ex-GST total (item + transport) for payment tracking
 function challanValue(ch) { return challanItemTotal(ch) + challanTransportCharge(ch); }
 // With-GST value
@@ -770,7 +784,7 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
               <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Liner Stock</span>
+              <span className="section-eyebrow" style={{ margin: 0 }}>Liner Stock</span>
               <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
             </div>
             <div className="g3">
@@ -782,28 +796,28 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
                 <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
                   <div className="lbl">{s.label}</div>
                   <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
-                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
+                  <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>{s.unit}</div>
                 </div>
               ))}
             </div>
             {Object.values(byGrade).sort((a, b) => `${a.bf}${a.gsm}`.localeCompare(`${b.bf}${b.gsm}`)).map(grp => (
               <div key={`${grp.bf}${grp.gsm}`} className="card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="serif" style={{ fontSize: 16, fontWeight: 500 }}>{grp.bf} BF · {grp.gsm} GSM</span>
-                    <span className="tag" style={{ background: "#edf7f0", borderColor: "#b5dcc0", color: "#2d6a4f" }}>Liner</span>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: "#111", letterSpacing: "-0.01em" }}>{grp.bf} BF · {grp.gsm} GSM</span>
+                    <span style={{ background: "#edf7f0", borderRadius: 20, padding: "3px 10px", fontSize: 9, fontWeight: 600, color: "#2d6a4f" }}>Liner</span>
                   </div>
-                  <div style={{ fontSize: 12, color: "#9a9080" }}>{grp.totalCount} liner{grp.totalCount !== 1 ? "s" : ""} · {fmt(Math.round(grp.totalKg))} kg</div>
+                  <span style={{ fontSize: 10, color: "#aaa" }}>{grp.totalCount} liner{grp.totalCount !== 1 ? "s" : ""} · {fmt(Math.round(grp.totalKg))} kg</span>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                   {grp.sizes.sort((a, b) => Number(a.size) - Number(b.size)).map(x => (
                     <div key={x.size} onClick={() => { setTab("Stock"); setStockNav({ linerTab: true }); }}
-                      style={{ background: "#f0f8f4", border: "1px solid #b5dcc0", borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s" }}
-                      onMouseEnter={e => e.currentTarget.style.transform = "scale(1.05)"}
+                      style={{ background: "#f0f8f4", border: "1.5px solid #b5dcc0", borderRadius: 12, padding: "8px 12px", textAlign: "center", minWidth: 60, cursor: "pointer", transition: "transform 0.12s" }}
+                      onMouseEnter={e => e.currentTarget.style.transform = "scale(1.04)"}
                       onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
-                      <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: "#2d6a4f" }}>{x.size}"</div>
-                      <div style={{ fontSize: 10, color: "#9a9080", marginTop: 4 }}>{x.count} liner{x.count !== 1 ? "s" : ""}</div>
-                      <div style={{ fontSize: 9, color: "#6a9080", marginTop: 1 }}>{fmt(Math.round(x.kg))} kg</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.02em", color: "#2d6a4f" }}>{x.size}"</div>
+                      <div style={{ fontSize: 9, color: "#6a9080", marginTop: 3 }}>{x.count} liner{x.count !== 1 ? "s" : ""}</div>
+                      <div style={{ fontSize: 9, color: "#9a9080", marginTop: 1 }}>{fmt(Math.round(x.kg))} kg</div>
                     </div>
                   ))}
                 </div>
@@ -831,7 +845,7 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
               <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Pasting Gum</span>
+              <span className="section-eyebrow" style={{ margin: 0 }}>Pasting Gum</span>
               <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
             </div>
             <div className="g3">
@@ -843,23 +857,23 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
                 <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
                   <div className="lbl">{s.label}</div>
                   <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
-                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
+                  <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>{s.unit}</div>
                 </div>
               ))}
             </div>
             {variantList.length > 0 && (
               <div className="card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <span className="serif" style={{ fontSize: 16, fontWeight: 500 }}>🪣 By Variant</span>
-                  <span style={{ fontSize: 12, color: "#9a9080" }}>{availGum.length} sack{availGum.length !== 1 ? "s" : ""} · {fmt(Math.round(totalAvailKg))} kg available</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: "#111", letterSpacing: "-0.01em" }}>🪣 By Variant</span>
+                  <span style={{ fontSize: 10, color: "#aaa" }}>{availGum.length} sack{availGum.length !== 1 ? "s" : ""} · {fmt(Math.round(totalAvailKg))} kg available</span>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                   {variantList.map(v => (
-                    <div key={v.id} style={{ background: "#fef9f0", border: "1px solid #f0d5a0", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div key={v.id} style={{ background: "#fef9f0", border: "1.5px solid #f0d5a0", borderRadius: 12, padding: "9px 14px", display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ width: 10, height: 10, borderRadius: 2, background: v.color || "#8b6914", flexShrink: 0 }} />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v.name}</div>
-                        <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: "#111", letterSpacing: "-0.01em" }}>{v.name}</div>
+                        <div style={{ fontSize: 10, color: "#aaa", marginTop: 1 }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
                       </div>
                     </div>
                   ))}
@@ -1803,10 +1817,10 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
 
   // ── LINER / GUM LIST VIEW ──
   if (productTab === "liner") {
-    return <LinerStockTab state={state} update={update} isEmployee={isEmployee} />;
+    return <LinerStockTab state={state} update={update} isEmployee={isEmployee} onBack={() => setProductTab("reels")} />;
   }
   if (productTab === "gum") {
-    return <GumStockTab state={state} update={update} isEmployee={isEmployee} />;
+    return <GumStockTab state={state} update={update} isEmployee={isEmployee} onBack={() => setProductTab("reels")} />;
   }
 
   return (
@@ -2222,30 +2236,30 @@ function SellTab({ state, update }) {
           {/* Totals section */}
           {previewGrand > 0 && (
             <div style={{ padding: "12px 14px" }}>
-              {effectiveTransportCharge > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
-                  <span style={{ color: "#888" }}>Items subtotal</span>
-                  <span style={{ fontWeight: 600, color: "#111" }}>{fmtRs(challanItemTotal(previewCh))}</span>
-                </div>
-              )}
-              {effectiveTransportCharge > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
-                  <span style={{ color: "#888" }}>🚚 Transport ({transportBy})</span>
-                  <span style={{ fontWeight: 600, color: "#111" }}>{fmtRs(effectiveTransportCharge)}</span>
-                </div>
-              )}
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
-                <span style={{ color: "#888" }}>Taxable total</span>
-                <span style={{ fontWeight: 700, color: "#111" }}>{fmtRs(challanTaxableAmount(previewCh))}</span>
+                <span style={{ color: "#888" }}>Goods value (taxable)</span>
+                <span style={{ fontWeight: 700, color: "#111" }}>{fmtRs2(challanTaxableAmount(previewCh))}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
                 <span style={{ color: "#22c55e" }}>CGST {previewCh.gumSacks?.length && !previewCh.reels?.filter(r=>r.soldRate>0).length ? "2.5%" : "9%"}</span>
-                <span style={{ fontWeight: 600, color: "#22c55e" }}>+ {fmtRs(previewGST.cgst)}</span>
+                <span style={{ fontWeight: 600, color: "#22c55e" }}>+ {fmtRs2(previewGST.cgst)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
                 <span style={{ color: "#22c55e" }}>SGST {previewCh.gumSacks?.length && !previewCh.reels?.filter(r=>r.soldRate>0).length ? "2.5%" : "9%"}</span>
-                <span style={{ fontWeight: 600, color: "#22c55e" }}>+ {fmtRs(previewGST.sgst)}</span>
+                <span style={{ fontWeight: 600, color: "#22c55e" }}>+ {fmtRs2(previewGST.sgst)}</span>
               </div>
+              {effectiveTransportCharge > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+                  <span style={{ color: "#888" }}>🚚 Transport ({transportBy}) <span style={{ fontSize: 9, color: "#bbb" }}>· no GST</span></span>
+                  <span style={{ fontWeight: 600, color: "#111" }}>{fmtRs2(effectiveTransportCharge)}</span>
+                </div>
+              )}
+              {Math.abs(challanRoundOff(previewCh)) >= 0.005 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                  <span style={{ color: "#aaa" }}>Round off</span>
+                  <span style={{ color: "#aaa" }}>{challanRoundOff(previewCh) >= 0 ? "+" : "−"} {fmtRs2(Math.abs(challanRoundOff(previewCh)))}</span>
+                </div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTop: "1.5px solid #111" }}>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#111" }}>Total Payable</div>
@@ -2267,7 +2281,7 @@ function SellTab({ state, update }) {
 }
 
 // ─── LINER STOCK TAB ─────────────────────────────────────────────────────────
-function LinerStockTab({ state, update, isEmployee }) {
+function LinerStockTab({ state, update, isEmployee, onBack }) {
   const [view, setView] = useState("list");
   const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today(), transportBy: "" });
   // Multi-reel conversion: map of reelId -> [{id, weight}]
@@ -2696,7 +2710,10 @@ function LinerStockTab({ state, update, isEmployee }) {
       {convSaved && <div className="ok-box">✓ Conversion saved! Liners added to stock.</div>}
       {linerInwardSaved && <div className="ok-box">✓ Liner inward saved! Added to stock.</div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-        <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
+        <div>
+          {onBack && <button className="btn btn-outline btn-sm" onClick={onBack} style={{ marginBottom: 8 }}>← Stock</button>}
+          <div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2>
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {!isEmployee && <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>}
           {!isEmployee && <button className="btn btn-outline" onClick={() => setView("linerInward")}>+ Add Liner Inward</button>}
@@ -4645,14 +4662,17 @@ function HistoryTab({ state, update }) {
                                 })()}
                                 {chForGST.transportCharge > 0 && (
                                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}>
-                                    <span style={{color:"#888"}}>🚚 Transport ({reels[0]?.transportBy||""})</span>
-                                    <span style={{fontWeight:600}}>{fmtRs(chForGST.transportCharge)}</span>
+                                    <span style={{color:"#888"}}>🚚 Transport ({reels[0]?.transportBy||""}) <span style={{fontSize:8,color:"#bbb"}}>· no GST</span></span>
+                                    <span style={{fontWeight:600}}>{fmtRs2(chForGST.transportCharge)}</span>
                                   </div>
                                 )}
                                 <div style={{ borderTop:"1px solid #e8e8e8", marginTop:4, paddingTop:4 }}>
-                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{fontWeight:600,color:"#111"}}>Taxable Total</span><span style={{fontWeight:700}}>{fmtRs(chExGST)}</span></div>
-                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#22c55e"}}>CGST {chForGST.gumSacks?.length&&!chForGST.reels?.length?"2.5%":"9%"}</span><span style={{color:"#22c55e",fontWeight:600}}>+{fmtRs(chGST.cgst)}</span></div>
-                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#22c55e"}}>SGST {chForGST.gumSacks?.length&&!chForGST.reels?.length?"2.5%":"9%"}</span><span style={{color:"#22c55e",fontWeight:600}}>+{fmtRs(chGST.sgst)}</span></div>
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{fontWeight:600,color:"#111"}}>Goods value (taxable)</span><span style={{fontWeight:700}}>{fmtRs2(chExGST)}</span></div>
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#22c55e"}}>CGST {chForGST.gumSacks?.length&&!chForGST.reels?.length?"2.5%":"9%"}</span><span style={{color:"#22c55e",fontWeight:600}}>+{fmtRs2(chGST.cgst)}</span></div>
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#22c55e"}}>SGST {chForGST.gumSacks?.length&&!chForGST.reels?.length?"2.5%":"9%"}</span><span style={{color:"#22c55e",fontWeight:600}}>+{fmtRs2(chGST.sgst)}</span></div>
+                                  {Math.abs(challanRoundOff(chForGST)) >= 0.005 && (
+                                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"2px 0" }}><span style={{color:"#aaa"}}>Round off</span><span style={{color:"#aaa"}}>{challanRoundOff(chForGST) >= 0 ? "+" : "−"}{fmtRs2(Math.abs(challanRoundOff(chForGST)))}</span></div>
+                                  )}
                                 </div>
                                 <div style={{ borderTop:"1px solid #e8e8e8", marginTop:4, paddingTop:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                                   <span style={{ fontSize:12, fontWeight:700, color:"#111" }}>Total (with GST)</span>
@@ -6300,7 +6320,7 @@ function _OldReportsTabBody({ state }) {
 
 
 // ─── GUM STOCK TAB ──────────────────────────────────────────────────────────
-function GumStockTab({ state, update, isEmployee }) {
+function GumStockTab({ state, update, isEmployee, onBack }) {
   const [view, setView] = useState("list"); // "list" | "inward" | "history"
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({ supplier: "", invoiceNo: "", date: "", variantId: "", sackWeight: "", numSacks: "", costRate: "", transportRate: "", waraiRate: "" });
@@ -6539,7 +6559,10 @@ function GumStockTab({ state, update, isEmployee }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-        <div><div className="section-eyebrow">Gum Inventory</div><h2>Pasting Gum Stock</h2></div>
+        <div>
+          {onBack && <button className="btn btn-outline btn-sm" onClick={onBack} style={{ marginBottom: 8 }}>← Stock</button>}
+          <div className="section-eyebrow">Gum Inventory</div><h2>Pasting Gum Stock</h2>
+        </div>
         {!isEmployee && <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("history")}>📋 Inward History</button>
           <button className="btn btn-dark" onClick={() => setView("inward")}>+ Add Inward</button>
