@@ -3703,22 +3703,35 @@ function HistoryTab({ state, update }) {
       const byCustomer = {};
       sorted.forEach(p => { if (!byCustomer[p.customer]) byCustomer[p.customer] = []; byCustomer[p.customer].push(p); });
       const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+      // Get live GST-inclusive amount for each payment
+      const getLiveAmt = (p) => {
+        const chReels = state.stock.filter(r => r.sold && r.soldChallanNo === p.challanNo && r.soldTo === p.customer);
+        const chGum = (state.gumStock||[]).filter(g => g.sold && g.soldChallanNo === p.challanNo && g.soldTo === p.customer);
+        if (chReels.length || chGum.length) {
+          const live = challanGrandTotal({ reels: chReels, gumSacks: chGum, transportCharge: chReels[0]?.transportCharge||0 });
+          if (live > 0) return live;
+        }
+        return p.amount || 0;
+      };
       const rows = Object.entries(byCustomer).map(([cust, invs]) => {
-        const custTotal = invs.reduce((s,p) => s + (p.amount||0), 0);
-        const invoiceRows = invs.map(p => `
+        const custTotal = invs.reduce((s,p) => s + getLiveAmt(p), 0);
+        const invoiceRows = invs.map(p => {
+          const amt = getLiveAmt(p);
+          return `
           <tr>
             <td><strong>CH #${p.challanNo||"—"}</strong></td>
             <td>${fmtDate(p.challanDate)}</td>
             <td>${fmtDate(p.dueDate)}</td>
             <td style="color:#c62828">${Math.abs(daysDiff(p.dueDate))}d overdue</td>
-            <td style="text-align:right;font-weight:700">${fmtRs(p.amount||0)}</td>
-          </tr>`).join("");
+            <td style="text-align:right;font-weight:700">${fmtRs(amt)}</td>
+          </tr>`;
+        }).join("");
         return `
           <div class="customer-block">
             <div class="cust-name">${cust}</div>
             <table>
               <thead><tr>
-                <th>Challan</th><th>Invoice Date</th><th>Due Date</th><th>Status</th><th style="text-align:right">Amount</th>
+                <th>Challan</th><th>Invoice Date</th><th>Due Date</th><th>Status</th><th style="text-align:right">Amount (incl. GST)</th>
               </tr></thead>
               <tbody>${invoiceRows}</tbody>
               <tfoot><tr class="total-row">
@@ -3818,7 +3831,18 @@ function HistoryTab({ state, update }) {
                   </div>
                   <div style={{ padding:"10px 10px", display:"flex", flexDirection:"column", alignItems:"flex-end", justifyContent:"center", gap:4 }}>
                     <span style={{ fontSize: 10, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "2px 7px", fontWeight: 700 }}>{badge.label}</span>
-                    <div style={{ fontWeight: 800, fontSize: 13, color:"#111" }}>{p.amount > 0 ? fmtRs(p.amount) : "—"}</div>
+                    {(() => {
+                      const chReels = state.stock.filter(r => r.sold && r.soldChallanNo === p.challanNo && r.soldTo === p.customer);
+                      const chGum = (state.gumStock||[]).filter(g => g.sold && g.soldChallanNo === p.challanNo && g.soldTo === p.customer);
+                      const liveAmt = (chReels.length||chGum.length) ? challanGrandTotal({reels:chReels,gumSacks:chGum,transportCharge:chReels[0]?.transportCharge||0}) : 0;
+                      const displayAmt = liveAmt || p.amount;
+                      return (
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontWeight: 800, fontSize: 13, color:"#111" }}>{displayAmt > 0 ? fmtRs(displayAmt) : "—"}</div>
+                          {displayAmt > 0 && <div style={{ fontSize:8, color:"#b8860b", fontWeight:600 }}>incl. GST</div>}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div style={{ color: "#ccc", fontSize: 16, display:"flex", alignItems:"center", paddingRight:8 }}>›</div>
                 </div>
@@ -4053,19 +4077,34 @@ function HistoryTab({ state, update }) {
                 </div>
                 {/* Running balance */}
                 {custPayments.length > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontSize: 12, color: "#aaa" }}>{custPayments.length} invoice{custPayments.length!==1?"s":""} · {fmtRs(custPayments.filter(p=>!p.paid).reduce((s,p)=>s+(p.amount||0),0))} outstanding</div>
+                    <button className="btn btn-outline btn-sm" onClick={() => {
+                      update(s => {
+                        (s.payments||[]).forEach((p, i) => {
+                          if (p.customer !== selCustomer) return;
+                          const chReels = (s.stock||[]).filter(r => r.sold && r.soldChallanNo === p.challanNo && r.soldTo === p.customer);
+                          const chGum = (s.gumStock||[]).filter(g => g.sold && g.soldChallanNo === p.challanNo && g.soldTo === p.customer);
+                          if (!chReels.length && !chGum.length) return;
+                          const newAmt = challanGrandTotal({ reels: chReels, gumSacks: chGum, transportCharge: chReels[0]?.transportCharge||0 });
+                          if (newAmt > 0) s.payments[i].amount = newAmt;
+                        });
+                      });
+                    }}>🔄 Sync GST amounts</button>
+                  </div>
+                )}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                     {[
-                      { label: "Total Billed", val: fmtRs(totalBilled), color: "#1a1a1a", bg: "#fff" },
-                      { label: "Total Collected", val: fmtRs(totalPaid), color: "#2d6a4f", bg: "#edf7f0" },
-                      { label: "Outstanding", val: fmtRs(outstanding), color: outstanding > 0 ? "#b83020" : "#2d6a4f", bg: outstanding > 0 ? "#fef0ee" : "#edf7f0" },
+                      { label: "Total Billed", val: fmtRs(totalBilled), color: "#111", bg: "#fff" },
+                      { label: "Total Collected", val: fmtRs(totalPaid), color: "#2e7d32", bg: "#e8f5e9" },
+                      { label: "Outstanding", val: fmtRs(outstanding), color: outstanding > 0 ? "#c62828" : "#2e7d32", bg: outstanding > 0 ? "#fce4ec" : "#e8f5e9" },
                     ].map(s => (
-                      <div key={s.label} style={{ background: s.bg, border: "1px solid #e8e2d8", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
-                        <div style={{ fontSize: 10, color: "#8b6914", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display',serif" }}>{s.val}</div>
+                      <div key={s.label} style={{ background: s.bg, border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>{s.label}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: s.color }}>{s.val}</div>
                       </div>
                     ))}
                   </div>
-                )}
                 {/* Aging + efficiency */}
                 {custOverdue.length > 0 && (
                   <div className="card" style={{ padding: "12px 14px", background: "#fef0ee", border: "1px solid #f0c0ba" }}>
@@ -4098,26 +4137,41 @@ function HistoryTab({ state, update }) {
                     {custPayments.map((p, pi) => {
                       const status = getPaymentStatus(p);
                       const badge = paymentStatusBadge(status, p.dueDate);
+                      // Try to find the live challan amount (GST-inclusive) for display
+                      const liveChallan = (() => {
+                        const chReels = state.stock.filter(r => r.sold && (r.soldChallanNo === p.challanNo || makeChallanKey({challanNo:p.challanNo,date:p.challanDate,customer:p.customer}) === makeChallanKey({challanNo:r.soldChallanNo,date:r.soldDate,customer:r.soldTo})));
+                        const chGum = (state.gumStock||[]).filter(g => g.sold && g.soldChallanNo === p.challanNo);
+                        if (!chReels.length && !chGum.length) return null;
+                        return challanGrandTotal({ reels: chReels, gumSacks: chGum, transportCharge: chReels[0]?.transportCharge || 0 });
+                      })();
+                      const displayAmt = liveChallan || p.amount;
+                      const isStale = liveChallan && p.amount && Math.abs(liveChallan - p.amount) > 1;
                       return (
-                        <div key={p.id} style={{ padding: "12px 14px", borderBottom: pi < custPayments.length-1 ? "1px solid #e8eef8" : "none", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div key={p.id} style={{ padding: "12px 14px", borderBottom: pi < custPayments.length-1 ? "1px solid rgba(0,0,0,0.05)" : "none", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                              {p.challanNo && <span style={{ fontWeight: 700, fontSize: 13 }}>CH {p.challanNo}</span>}
+                              {p.challanNo && <span style={{ fontWeight: 700, fontSize: 13 }}>CH #{p.challanNo}</span>}
                               <span style={{ fontSize: 11, background: badge.bg, border: `1px solid ${badge.border}`, color: badge.color, borderRadius: 5, padding: "1px 7px", fontWeight: 600 }}>{badge.label}</span>
-                              {p.amount > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>{fmtRs(p.amount)}</span>}
+                              {displayAmt > 0 && (
+                                <div>
+                                  <span style={{ fontSize: 13, fontWeight: 800, color: "#111" }}>{fmtRs(displayAmt)}</span>
+                                  <span style={{ fontSize: 9, color: "#b8860b", fontWeight: 600, marginLeft: 4 }}>incl. GST</span>
+                                  {isStale && <span style={{ fontSize: 9, color: "#e65100", marginLeft: 4 }}>⚠ outdated</span>}
+                                </div>
+                              )}
                             </div>
-                            <div style={{ fontSize: 11, color: "#9a9080" }}>
+                            <div style={{ fontSize: 11, color: "#aaa" }}>
                               {fmtDate(p.challanDate)}
                               {p.dueDate && <span> · Due {fmtDate(p.dueDate)}</span>}
-                              {p.paid && p.paidDate && <span style={{ color: "#2d6a4f" }}> · Paid {fmtDate(p.paidDate)}</span>}
+                              {p.paid && p.paidDate && <span style={{ color: "#2e7d32" }}> · Paid {fmtDate(p.paidDate)}</span>}
                             </div>
                             {/* Per-challan credit days override */}
                             {!p.paid && (
                               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 10, color: "#b0a898" }}>Override credit days:</span>
+                                <span style={{ fontSize: 10, color: "#aaa" }}>Override credit days:</span>
                                 {CREDIT_PRESETS.map(d => (
                                   <button key={d} onClick={() => update(s => { const i=(s.payments||[]).findIndex(x=>x.id===p.id); if(i!==-1){s.payments[i].creditDays=d;s.payments[i].dueDate=addDays(s.payments[i].challanDate,d);} })}
-                                    style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, border: "1px solid", cursor: "pointer", background: p.creditDays===d?"#1a1a1a":"transparent", color: p.creditDays===d?"#fff":"#6a6050", borderColor: p.creditDays===d?"#1a1a1a":"#ddd8ce" }}>{d}d</button>
+                                    style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, border: "1px solid", cursor: "pointer", background: p.creditDays===d?"#111":"transparent", color: p.creditDays===d?"#fff":"#666", borderColor: p.creditDays===d?"#111":"#ddd" }}>{d}d</button>
                                 ))}
                               </div>
                             )}
