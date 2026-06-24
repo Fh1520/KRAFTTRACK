@@ -112,16 +112,16 @@ function challanItemTotal(ch) {
 function challanTransportCharge(ch) { return Number(ch.transportCharge) || 0; }
 function challanTaxableAmount(ch) { return challanItemTotal(ch) + challanTransportCharge(ch); }
 function challanGST(ch) {
-  // Split by reels (18%) and gum (5%) — if mixed, each portion taxed at its rate
   const reelTotal = (ch.reels||[]).reduce((s,r) => s + (Number(r.soldRate)||0)*Number(r.weight), 0);
   const gumTotal = (ch.gumSacks||[]).reduce((s,g) => s + (Number(g.soldRate)||0)*Number(g.sackWeight||DEFAULT_GUM_SACK_WEIGHT), 0);
   const transport = challanTransportCharge(ch);
-  // Transport GST follows reel rate (18%) if reels present, gum rate if gum only
-  const transportGst = reelTotal > 0 ? transport * 0.18 : transport * 0.05;
+  // transportGstApplicable — stored on reel, defaults to true if not set (new challans)
+  const gstOnTransport = ch.reels?.[0]?.transportGstApplicable !== false;
+  const transportGst = gstOnTransport ? (reelTotal > 0 ? transport * 0.18 : transport * 0.05) : 0;
   const reelGst = reelTotal * 0.18;
   const gumGst = gumTotal * 0.05;
   const totalGst = reelGst + gumGst + transportGst;
-  return { reelGst, gumGst, transportGst, totalGst, cgst: totalGst/2, sgst: totalGst/2 };
+  return { reelGst, gumGst, transportGst, totalGst, cgst: totalGst/2, sgst: totalGst/2, gstOnTransport };
 }
 function challanGrandTotal(ch) { return Math.round(challanTaxableAmount(ch) + challanGST(ch).totalGst); }
 // Updated challanValue — now returns ex-GST total (item + transport) for payment tracking
@@ -1917,6 +1917,7 @@ function SellTab({ state, update }) {
   const [transportBy, setTransportBy] = useState("");
   const [chargeTransport, setChargeTransport] = useState(true);
   const [transportCharge, setTransportCharge] = useState("");
+  const [transportGstApplicable, setTransportGstApplicable] = useState(true);
 
   const SELF_CASH = ["self", "cash"]; // transporters that never get charged to customer
 
@@ -1974,7 +1975,7 @@ function SellTab({ state, update }) {
   // GST preview for sell screen
   const gumKgPreview = (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).reduce((s, g) => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
   const gumValPreview = gumSellRate ? gumKgPreview * Number(gumSellRate) : 0;
-  const previewCh = { reels: selReels.map(r => ({...r, soldRate: Number(sellRates[`${r.bf}|${r.gsm}`])||0})), gumSacks: (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).map(g => ({...g, soldRate: Number(gumSellRate)||0})), transportCharge: effectiveTransportCharge };
+  const previewCh = { reels: selReels.map(r => ({...r, soldRate: Number(sellRates[`${r.bf}|${r.gsm}`])||0, transportGstApplicable})), gumSacks: (state.gumStock||[]).filter(g => selectedGumIds.includes(g.id)).map(g => ({...g, soldRate: Number(gumSellRate)||0})), transportCharge: effectiveTransportCharge };
   const previewGST = challanGST(previewCh);
   const previewGrand = challanGrandTotal(previewCh);
 
@@ -1990,7 +1991,7 @@ function SellTab({ state, update }) {
       s.stock = s.stock.map(r => {
         if (!selected.includes(r.id)) return r;
         const soldRate = Number(sellRates[`${r.bf}|${r.gsm}`]) || 0;
-        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined, transportCharge: effectiveTransportCharge || undefined };
+        return { ...r, sold: true, soldDate: date, soldTo: customer, soldChallanNo: challanNo, soldRate, transportBy: transportBy.trim() || undefined, transportCharge: effectiveTransportCharge || undefined, transportGstApplicable: transportGstApplicable };
       });
       if (!s.gumStock) s.gumStock = [];
       s.gumStock = s.gumStock.map(g => {
@@ -2038,7 +2039,7 @@ function SellTab({ state, update }) {
         {done.gumCount > 0 && <div style={{ marginTop: 4 }}>{done.gumCount} gum sacks · {fmt(done.gumKg)} kg</div>}
         <div style={{ marginTop: 4 }}>{done.grandTotal > 0 ? <><span style={{ color: "#aaa" }}>Ex-GST: {fmtRs(done.val || 0)}</span> · <strong>With GST: {fmtRs(done.grandTotal)}</strong></> : "no rate set"} → {done.customer}</div>
       </div>
-      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setSelectedGumIds([]); setGumSellRate(""); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); setTransportCharge(""); setChargeTransport(true); }}>Record Another Sale</button>
+      <button className="btn btn-dark" style={{ marginTop: 22 }} onClick={() => { setDone(null); setSelected([]); setSelectedGumIds([]); setGumSellRate(""); setCustomer(""); setChallanNo(suggestedChallan); setSellRates({}); setTransportBy(""); setTransportCharge(""); setChargeTransport(true); setTransportGstApplicable(true); }}>Record Another Sale</button>
     </div>
   );
 
@@ -2124,6 +2125,15 @@ function SellTab({ state, update }) {
                 <div style={{ flex: 1 }}>
                   <label className="lbl">Charge Amount (₹/trip)</label>
                   <input type="number" inputMode="numeric" value={transportCharge} onChange={e => setTransportCharge(e.target.value)} placeholder="e.g. 300" />
+                </div>
+              </div>
+            )}
+            {chargeTransport && transportCharge && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: "#666" }}>Apply GST (18%) on transport?</div>
+                <div style={{ display: "flex", gap: 5 }}>
+                  <button onClick={() => setTransportGstApplicable(true)} style={{ padding: "3px 12px", borderRadius: 20, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: transportGstApplicable ? "#111" : "#ebebeb", color: transportGstApplicable ? "#fff" : "#666" }}>Yes</button>
+                  <button onClick={() => setTransportGstApplicable(false)} style={{ padding: "3px 12px", borderRadius: 20, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: !transportGstApplicable ? "#111" : "#ebebeb", color: !transportGstApplicable ? "#fff" : "#666" }}>No</button>
                 </div>
               </div>
             )}
@@ -3258,17 +3268,26 @@ function HistoryTab({ state, update }) {
   const startEditChallan = (ch, key) => {
     setEditingChallan(key);
     const reelsArr = ch.reels || [];
-    setEditForm({ customer: ch.customer || "", date: ch.date || "", challanNo: ch.challanNo || "", transportBy: reelsArr[0]?.transportBy || "", transportCharge: reelsArr[0]?.transportCharge || "" });
+    const existingCharge = Number(reelsArr[0]?.transportCharge) || 0;
+    setEditForm({
+      customer: ch.customer || "",
+      date: ch.date || "",
+      challanNo: ch.challanNo || "",
+      transportBy: reelsArr[0]?.transportBy || "",
+      transportCharge: existingCharge || "",
+      chargeTransport: existingCharge > 0 ? true : (reelsArr[0]?.transportBy ? false : true),
+      transportGstApplicable: reelsArr[0]?.transportGstApplicable !== false,
+    });
     setOpenChallan(key);
   };
 
   const saveEditChallan = (ch, key) => {
     const ids = (ch.reels||[]).map(r => r.id);
-    const charge = editForm.transportCharge !== "" ? Number(editForm.transportCharge) : undefined;
+    const charge = (editForm.chargeTransport !== false && editForm.transportCharge !== "") ? Number(editForm.transportCharge) : 0;
     update(s => {
       s.stock = s.stock.map(r => {
         if (!ids.includes(r.id)) return r;
-        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined, transportCharge: charge };
+        return { ...r, soldTo: editForm.customer, soldDate: editForm.date, soldChallanNo: editForm.challanNo, transportBy: editForm.transportBy || undefined, transportCharge: charge || undefined, transportGstApplicable: editForm.transportGstApplicable };
       });
       if (s.gumStock) {
         s.gumStock = s.gumStock.map(g => {
@@ -4526,13 +4545,34 @@ function HistoryTab({ state, update }) {
                             </div>
                           </div>
                           <div style={{ marginBottom: 10 }}>
-                            <label className="lbl">🚚 Transport By <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+                            <label className="lbl">🚚 Transport By <span style={{ fontWeight: 400, color: "#aaa", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
                             <TransporterInput value={editForm.transportBy || ""} onChange={v => setEditForm(f => ({ ...f, transportBy: v }))} transporters={state.transporters || []} placeholder="Transporter name" />
                           </div>
                           {editForm.transportBy && !["self","cash"].includes(editForm.transportBy.trim().toLowerCase()) && (
-                            <div style={{ marginBottom: 10 }}>
-                              <label className="lbl">Transport Charge (₹/trip) <span style={{ fontWeight: 400, color: "#b0a898", textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
-                              <input type="number" inputMode="numeric" value={editForm.transportCharge || ""} onChange={e => setEditForm(f => ({ ...f, transportCharge: e.target.value }))} placeholder="e.g. 300" />
+                            <div style={{ marginBottom: 10, background: "#f9f9f9", borderRadius: 10, padding: "11px 13px", border: "1.5px solid rgba(0,0,0,0.07)" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: editForm.chargeTransport !== false ? 10 : 0 }}>
+                                <div>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111" }}>Charge to customer?</div>
+                                  {editForm.chargeTransport === false && <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>Trip still counted in {editForm.transportBy}'s ledger</div>}
+                                </div>
+                                <div style={{ display: "flex", gap: 5 }}>
+                                  <button onClick={() => setEditForm(f => ({ ...f, chargeTransport: true }))} style={{ padding: "4px 14px", borderRadius: 20, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: editForm.chargeTransport !== false ? "#111" : "#ebebeb", color: editForm.chargeTransport !== false ? "#fff" : "#666" }}>Yes</button>
+                                  <button onClick={() => setEditForm(f => ({ ...f, chargeTransport: false }))} style={{ padding: "4px 14px", borderRadius: 20, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: editForm.chargeTransport === false ? "#111" : "#ebebeb", color: editForm.chargeTransport === false ? "#fff" : "#666" }}>No</button>
+                                </div>
+                              </div>
+                              {editForm.chargeTransport !== false && (
+                                <div>
+                                  <label className="lbl">Charge Amount (₹/trip)</label>
+                                  <input type="number" inputMode="numeric" value={editForm.transportCharge || ""} onChange={e => setEditForm(f => ({ ...f, transportCharge: e.target.value }))} placeholder="e.g. 300" />
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                                    <div style={{ fontSize: 11, color: "#666" }}>Apply GST (18%) on transport?</div>
+                                    <div style={{ display: "flex", gap: 5 }}>
+                                      <button onClick={() => setEditForm(f => ({ ...f, transportGstApplicable: true }))} style={{ padding: "3px 12px", borderRadius: 20, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: editForm.transportGstApplicable !== false ? "#111" : "#ebebeb", color: editForm.transportGstApplicable !== false ? "#fff" : "#666" }}>Yes</button>
+                                      <button onClick={() => setEditForm(f => ({ ...f, transportGstApplicable: false }))} style={{ padding: "3px 12px", borderRadius: 20, border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", background: editForm.transportGstApplicable === false ? "#111" : "#ebebeb", color: editForm.transportGstApplicable === false ? "#fff" : "#666" }}>No</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                           <div style={{ display: "flex", gap: 8 }}>
