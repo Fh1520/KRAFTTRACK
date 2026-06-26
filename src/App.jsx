@@ -765,42 +765,41 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
         });
         return (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
-              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Liner Stock</span>
-              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+              <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.08)" }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#aaa", letterSpacing: "0.08em", textTransform: "uppercase" }}>Liner Stock</span>
+              <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.08)" }} />
             </div>
-            <div className="g3">
-              {[
-                { label: "Available Liners", val: availLiners.length, unit: "in stock" },
-                { label: "Liner Weight", val: (totalLinerKg / 1000).toFixed(2), unit: "metric tons" },
-                { label: "Liner Grades", val: Object.keys(byGrade).length, unit: "specs in stock" },
-              ].map(s => (
-                <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
-                  <div className="lbl">{s.label}</div>
-                  <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
-                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
-                </div>
-              ))}
+            <div className="g2">
+              <div className="card" style={{ padding: "18px 20px" }}>
+                <div className="lbl">Available Liners</div>
+                <div className="stat-num" style={{ fontSize: 32 }}><AnimatedNumber value={availLiners.length} /></div>
+                <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>in stock</div>
+              </div>
+              <div className="card" style={{ padding: "18px 20px" }}>
+                <div className="lbl">Liner Weight</div>
+                <div className="stat-num" style={{ fontSize: 32 }}><AnimatedNumber value={Math.round(totalLinerKg / 1000 * 100) / 100} /> <span style={{ fontSize: 14, fontWeight: 500, color: "#aaa" }}>t</span></div>
+                <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>{fmt(Math.round(totalLinerKg))} kg</div>
+              </div>
             </div>
             {Object.values(byGrade).sort((a, b) => `${a.bf}${a.gsm}`.localeCompare(`${b.bf}${b.gsm}`)).map(grp => (
               <div key={`${grp.bf}${grp.gsm}`} className="card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="serif" style={{ fontSize: 16, fontWeight: 500 }}>{grp.bf} BF · {grp.gsm} GSM</span>
-                    <span className="tag" style={{ background: "#edf7f0", borderColor: "#b5dcc0", color: "#2d6a4f" }}>Liner</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#111", letterSpacing: "-0.01em" }}>{grp.bf} BF · {grp.gsm} GSM</div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                    <span style={{ background: "#e8f5e9", borderRadius: 20, padding: "2px 9px", fontSize: 9, fontWeight: 700, color: "#2e7d32" }}>Liner</span>
+                    <span style={{ fontSize: 10, color: "#aaa" }}>{grp.totalCount} liner{grp.totalCount !== 1 ? "s" : ""} · {fmt(Math.round(grp.totalKg))} kg</span>
                   </div>
-                  <div style={{ fontSize: 12, color: "#9a9080" }}>{grp.totalCount} liner{grp.totalCount !== 1 ? "s" : ""} · {fmt(Math.round(grp.totalKg))} kg</div>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                   {grp.sizes.sort((a, b) => Number(a.size) - Number(b.size)).map(x => (
                     <div key={x.size} onClick={() => { setTab("Stock"); setStockNav({ linerTab: true }); }}
-                      style={{ background: "#f0f8f4", border: "1px solid #b5dcc0", borderRadius: 10, padding: "9px 14px", textAlign: "center", minWidth: 68, cursor: "pointer", transition: "transform 0.1s" }}
-                      onMouseEnter={e => e.currentTarget.style.transform = "scale(1.05)"}
+                      style={{ background: "#f0f8f4", border: "1.5px solid #b5dcc0", borderRadius: 12, padding: "8px 12px", textAlign: "center", minWidth: 64, cursor: "pointer", transition: "transform 0.12s" }}
+                      onMouseEnter={e => e.currentTarget.style.transform = "scale(1.04)"}
                       onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
-                      <div className="serif" style={{ fontSize: 20, lineHeight: 1, color: "#2d6a4f" }}>{x.size}"</div>
-                      <div style={{ fontSize: 10, color: "#9a9080", marginTop: 4 }}>{x.count} liner{x.count !== 1 ? "s" : ""}</div>
-                      <div style={{ fontSize: 9, color: "#6a9080", marginTop: 1 }}>{fmt(Math.round(x.kg))} kg</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1, color: "#2e7d32", letterSpacing: "-0.02em", fontFamily: "'Inter',sans-serif" }}>{x.size}"</div>
+                      <div style={{ fontSize: 9, color: "#5a9070", marginTop: 3, fontWeight: 600 }}>{x.count} liner{x.count !== 1 ? "s" : ""}</div>
+                      <div style={{ fontSize: 9, color: "#aaa", marginTop: 1 }}>{fmt(Math.round(x.kg))} kg</div>
                     </div>
                   ))}
                 </div>
@@ -826,37 +825,37 @@ function HomeTab({ state, setTab, setStockNav, lowItems, moderateItems, totalKg,
         const variantList = Object.values(byVariant).filter(v => v.sacks > 0);
         return (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
-              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
-              <span className="serif-italic" style={{ fontSize: 14, color: "#9a9080" }}>Pasting Gum</span>
-              <div style={{ flex: 1, height: 1, background: "#e8e2d8" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+              <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.08)" }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#aaa", letterSpacing: "0.08em", textTransform: "uppercase" }}>Pasting Gum</span>
+              <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.08)" }} />
             </div>
-            <div className="g3">
-              {[
-                { label: "Available Sacks", val: availGum.length, unit: "in stock" },
-                { label: "Sacks Sold", val: soldGum.length, unit: "dispatched" },
-                { label: "Available Weight", val: (totalAvailKg / 1000).toFixed(2), unit: "metric tons" },
-              ].map(s => (
-                <div key={s.label} className="card" style={{ padding: "18px 20px" }}>
-                  <div className="lbl">{s.label}</div>
-                  <div className="stat-num" style={{ fontSize: 32 }}>{s.val}</div>
-                  <div className="serif-italic" style={{ fontSize: 12, color: "#b0a898", marginTop: 4 }}>{s.unit}</div>
-                </div>
-              ))}
+            <div className="g2">
+              <div className="card" style={{ padding: "18px 20px" }}>
+                <div className="lbl">Available Sacks</div>
+                <div className="stat-num" style={{ fontSize: 32 }}><AnimatedNumber value={availGum.length} /></div>
+                <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>in stock</div>
+              </div>
+              <div className="card" style={{ padding: "18px 20px" }}>
+                <div className="lbl">Available Weight</div>
+                <div className="stat-num" style={{ fontSize: 32 }}><AnimatedNumber value={Math.round(totalAvailKg / 1000 * 100) / 100} /> <span style={{ fontSize: 14, fontWeight: 500, color: "#aaa" }}>t</span></div>
+                <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>{fmt(Math.round(totalAvailKg))} kg</div>
+              </div>
             </div>
             {variantList.length > 0 && (
               <div className="card">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <span className="serif" style={{ fontSize: 16, fontWeight: 500 }}>🪣 By Variant</span>
-                  <span style={{ fontSize: 12, color: "#9a9080" }}>{availGum.length} sack{availGum.length !== 1 ? "s" : ""} · {fmt(Math.round(totalAvailKg))} kg available</span>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#111", letterSpacing: "-0.01em" }}>🪣 By Variant</div>
+                  <span style={{ fontSize: 10, color: "#aaa" }}>{availGum.length} sacks · {fmt(Math.round(totalAvailKg))} kg</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {variantList.map(v => (
-                    <div key={v.id} style={{ background: "#fef9f0", border: "1px solid #f0d5a0", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: 2, background: v.color || "#8b6914", flexShrink: 0 }} />
+                    <div key={v.id} style={{ background: "#fafafa", border: "1.5px solid rgba(0,0,0,0.08)", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                      onClick={() => { setTab("Stock"); setStockNav({ gumTab: true }); }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 3, background: v.color || "#b8860b", flexShrink: 0 }} />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v.name}</div>
-                        <div style={{ fontSize: 11, color: "#9a9080", marginTop: 1 }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: "#111" }}>{v.name}</div>
+                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>{v.sacks} sack{v.sacks !== 1 ? "s" : ""} · {fmt(Math.round(v.kg))} kg</div>
                       </div>
                     </div>
                   ))}
@@ -1870,37 +1869,35 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
             const isModerate = lowCount === 3;
             return (
               <div key={`${grp.size}${grp.bf}${grp.gsm}`}
-                style={{ padding: "12px 16px", borderBottom: idx < sizeGroups.length - 1 ? "1px solid #e8eef8" : "none", cursor: "pointer", transition: "background 0.12s" }}
+                style={{ padding: "11px 14px", borderBottom: idx < sizeGroups.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none", cursor: "pointer", transition: "background 0.12s" }}
                 onClick={() => { setFilter(f => ({ ...f, size: grp.size })); setView("size"); }}
-                onMouseEnter={e => e.currentTarget.style.background = "#faf8f4"}
+                onMouseEnter={e => e.currentTarget.style.background = "#fafafa"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                {/* Line 1: size + grade + count + status + arrow */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: grp.reels.length > 0 ? 6 : 0 }}>
-                  <span className="serif" style={{ fontSize: 26, lineHeight: 1, color: isCritical ? "#a05800" : isModerate ? "#2d2d2d" : "#1a1a1a", minWidth: 48, flexShrink: 0 }}>{grp.size}"</span>
-                  <span className="tag" style={{ flexShrink: 0, fontSize: 11 }}>{grp.bf} BF · {grp.gsm} GSM</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 24, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.02em", color: isCritical ? "#e65100" : isModerate ? "#111" : "#111", minWidth: 48, flexShrink: 0 }}>{grp.size}"</span>
+                  <span style={{ background: "#f5f5f5", borderRadius: 20, padding: "2px 8px", fontSize: 9, fontWeight: 600, color: "#555", flexShrink: 0 }}>{grp.bf} BF · {grp.gsm} GSM</span>
                   <div style={{ flex: 1 }} />
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                     {grp.reels.length === 0
-                      ? <span style={{ fontSize: 11, color: "#b0a898", fontStyle: "italic" }}>No stock</span>
-                      : <span style={{ fontSize: 12, fontWeight: 600, color: isCritical ? "#a05800" : "#1a1a1a" }}>{grp.reels.length} reel{grp.reels.length !== 1 ? "s" : ""}</span>
+                      ? <span style={{ fontSize: 11, color: "#aaa", fontStyle: "italic" }}>No stock</span>
+                      : <span style={{ fontSize: 12, fontWeight: 700, color: isCritical ? "#e65100" : "#111" }}>{grp.reels.length} reel{grp.reels.length !== 1 ? "s" : ""}</span>
                     }
-                    {grp.convertedReels?.length > 0 && <span style={{ fontSize: 10, background: "#f0eaf8", border: "1px solid #c8b0e0", borderRadius: 4, padding: "1px 6px", color: "#6a3a8a", fontWeight: 600 }}>{grp.convertedReels.length} → liner</span>}
-                    {isCritical && <span className="tag tag-orange" style={{ fontSize: 10 }}>Low</span>}
-                    {isModerate && <span className="tag tag-blue" style={{ fontSize: 10 }}>3 left</span>}
-                    {filter.showSold && grp.soldReels.length > 0 && <span style={{ fontSize: 10, color: "#9a9080" }}>+{grp.soldReels.length} sold</span>}
+                    {grp.convertedReels?.length > 0 && <span style={{ fontSize: 10, background: "#f0eaf8", border: "1px solid #c8b0e0", borderRadius: 20, padding: "2px 7px", color: "#6a3a8a", fontWeight: 600 }}>{grp.convertedReels.length} → liner</span>}
+                    {isCritical && <span style={{ background: "#fff3e0", color: "#e65100", borderRadius: 20, padding: "2px 8px", fontSize: 9, fontWeight: 700 }}>Low</span>}
+                    {isModerate && <span style={{ background: "#f0f4ff", color: "#3a5a9a", borderRadius: 20, padding: "2px 8px", fontSize: 9, fontWeight: 700 }}>3 left</span>}
+                    {filter.showSold && grp.soldReels.length > 0 && <span style={{ fontSize: 10, color: "#aaa" }}>+{grp.soldReels.length} sold</span>}
                   </div>
-                  <div style={{ color: "#c8b89a", fontSize: 16, flexShrink: 0 }}>›</div>
+                  <div style={{ color: "#ccc", fontSize: 14, flexShrink: 0 }}>›</div>
                 </div>
-                {/* Line 2: weight chips (capped at 6) + total */}
                 {grp.reels.length > 0 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingLeft: 48 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", paddingLeft: 52 }}>
                     {grp.reels.sort((a, b) => Number(a.weight) - Number(b.weight)).slice(0, 6).map((r) => (
-                      <span key={r.id} style={{ background: "#f8f7f4", border: "1px solid #e8e2d8", borderRadius: 4, padding: "2px 6px", fontSize: 11, color: "#3a3a3a", fontWeight: 500 }}>
+                      <span key={r.id} style={{ background: "#f5f5f5", borderRadius: 6, padding: "2px 7px", fontSize: 11, color: "#555", fontWeight: 600 }}>
                         {fmt(r.weight)}
                       </span>
                     ))}
-                    {grp.reels.length > 6 && <span style={{ fontSize: 11, color: "#9a9080" }}>+{grp.reels.length - 6} more</span>}
-                    <span style={{ fontSize: 11, color: "#9a9080", marginLeft: 4 }}>· {fmt(totalWtGrp)} kg</span>
+                    {grp.reels.length > 6 && <span style={{ fontSize: 11, color: "#aaa" }}>+{grp.reels.length - 6} more</span>}
+                    <span style={{ fontSize: 11, color: "#aaa", marginLeft: 2 }}>· {fmt(Math.round(totalWtGrp))} kg</span>
                   </div>
                 )}
               </div>
