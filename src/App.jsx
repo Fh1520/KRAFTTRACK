@@ -1414,9 +1414,13 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
 
   if (view === "size") {
     const sz = filter.size;
-    // Include ALL reels for this size (sold, available, converted) so grade keys are always found
-    // This prevents blank/crash when all reels of a new grade have been converted
-    const allForSize = state.stock.filter(r => r.size === sz && r.productType !== "liner");
+    const allForSize = state.stock.filter(r => {
+      if (r.size !== sz || r.productType === "liner") return false;
+      if (filter.bf && r.bf !== filter.bf) return false;
+      if (filter.gsm && r.gsm !== filter.gsm) return false;
+      if (filter.shade && r.shade !== filter.shade) return false;
+      return true;
+    });
     // Build separate data per grade so stock/inward/outward are never mixed
     const gradeKeys = [...new Set(allForSize.map(r => `${r.bf}|${r.gsm}|${r.shade||""}`))].sort();
     const gradeData = gradeKeys.map(gk => {
@@ -1800,10 +1804,10 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
 
   // ── LINER / GUM LIST VIEW ──
   if (productTab === "liner") {
-    return <LinerStockTab state={state} update={update} isEmployee={isEmployee} />;
+    return <LinerStockTab state={state} update={update} isEmployee={isEmployee} onBack={() => setProductTab("reels")} />;
   }
   if (productTab === "gum") {
-    return <GumStockTab state={state} update={update} isEmployee={isEmployee} />;
+    return <GumStockTab state={state} update={update} isEmployee={isEmployee} onBack={() => setProductTab("reels")} />;
   }
 
   return (
@@ -1818,40 +1822,39 @@ function StockTab({ state, update, stockNav, clearStockNav, isEmployee }) {
         ))}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-        <div><div className="section-eyebrow">Inventory</div><h2>Stock Register</h2></div>
+        <div><div className="section-eyebrow">Inventory</div><h2 style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, letterSpacing: "-0.03em" }}>Stock Register</h2></div>
         {!isEmployee && <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-outline" onClick={() => setView("inward")}>📋 Inward History</button>
-          <button className="btn btn-dark" onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
+          <button className="btn btn-outline btn-sm" style={{ borderRadius: 20 }} onClick={() => setView("inward")}>📋 Inward History</button>
+          <button className="btn btn-dark btn-sm" style={{ borderRadius: 20 }} onClick={() => { setView("add"); setSaved(false); setReels([]); }}>+ Add Inward</button>
         </div>}
       </div>
-      <div className="card" style={{ padding: "14px 20px" }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ minWidth: 160 }}>
-            <label className="lbl">Grade</label>
-            <select value={`${filter.bf}|${filter.gsm}`} onChange={e => { const [bf, gsm] = e.target.value.split("|"); setFilter(f => ({ ...f, bf, gsm })); }}>
-              <option value="|">All Grades</option>
-              {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
-            </select>
-          </div>
-          <div style={{ minWidth: 120 }}>
-            <label className="lbl">Shade</label>
-            <select value={filter.shade} onChange={e => setFilter(f => ({ ...f, shade: e.target.value }))}>
-              <option value="">All</option>{SHADE_OPTIONS.map(o => <option key={o} style={{ textTransform: "capitalize" }}>{o}</option>)}
-            </select>
-          </div>
-          <div style={{ minWidth: 110 }}>
-            <label className="lbl">Size</label>
-            <select value={filter.size} onChange={e => setFilter(f => ({ ...f, size: e.target.value }))}>
-              <option value="">All Sizes</option>{SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
-            </select>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
-            <input type="checkbox" checked={filter.showSold} onChange={e => setFilter(f => ({ ...f, showSold: e.target.checked }))} id="showSold" />
-            <label htmlFor="showSold" style={{ fontSize: 12, cursor: "pointer" }}>Include sold sizes</label>
-          </div>
-          <div style={{ fontSize: 11, color: "#9a9080", paddingBottom: 4, marginLeft: "auto" }}>
-            {totalAvailReels} reels · {fmt(totalAvailKg)} kg available
-          </div>
+      {/* Filter row — pill style matching sell screen */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={`${filter.bf}|${filter.gsm}`} onChange={e => { const [bf, gsm] = e.target.value.split("|"); setFilter(f => ({ ...f, bf, gsm })); }}
+            style={{ background: (filter.bf || filter.gsm) ? "#111" : "#fff", color: (filter.bf || filter.gsm) ? "#fff" : "#666", border: "none", borderRadius: 20, padding: "5px 14px", fontSize: 11, fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", cursor: "pointer" }}>
+            <option value="|">Grade ▾</option>
+            {state.grades.map(g => <option key={g.label} value={`${g.bf}|${g.gsm}`}>{g.bf} BF {g.gsm} GSM</option>)}
+          </select>
+          <select value={filter.shade} onChange={e => setFilter(f => ({ ...f, shade: e.target.value }))}
+            style={{ background: filter.shade ? "#111" : "#fff", color: filter.shade ? "#fff" : "#666", border: "none", borderRadius: 20, padding: "5px 14px", fontSize: 11, fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", cursor: "pointer" }}>
+            <option value="">Shade ▾</option>
+            {SHADE_OPTIONS.map(o => <option key={o} style={{ textTransform: "capitalize" }}>{o}</option>)}
+          </select>
+          <select value={filter.size} onChange={e => setFilter(f => ({ ...f, size: e.target.value }))}
+            style={{ background: filter.size ? "#111" : "#fff", color: filter.size ? "#fff" : "#666", border: "none", borderRadius: 20, padding: "5px 14px", fontSize: 11, fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", cursor: "pointer" }}>
+            <option value="">Size ▾</option>
+            {SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#666", cursor: "pointer" }}>
+            <input type="checkbox" checked={filter.showSold} onChange={e => setFilter(f => ({ ...f, showSold: e.target.checked }))} />
+            Include sold
+          </label>
+          {(filter.bf || filter.gsm || filter.shade || filter.size) && (
+            <button onClick={() => setFilter({ bf: "", gsm: "", shade: "", size: "", showSold: false })}
+              style={{ background: "#fce4ec", color: "#c62828", border: "none", borderRadius: 20, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>✕ Clear</button>
+          )}
+          <span style={{ fontSize: 11, color: "#aaa", marginLeft: "auto" }}>{totalAvailReels} reels · {fmt(Math.round(totalAvailKg))} kg</span>
         </div>
       </div>
       {sizeGroups.length === 0 ? (
@@ -2308,7 +2311,7 @@ function SellTab({ state, update }) {
 }
 
 // ─── LINER STOCK TAB ─────────────────────────────────────────────────────────
-function LinerStockTab({ state, update, isEmployee }) {
+function LinerStockTab({ state, update, isEmployee, onBack }) {
   const [view, setView] = useState("list");
   const [conversionForm, setConversionForm] = useState({ labourRate: "", corrugator: "", date: today(), transportBy: "" });
   // Multi-reel conversion: map of reelId -> [{id, weight}]
@@ -2737,7 +2740,8 @@ function LinerStockTab({ state, update, isEmployee }) {
       {convSaved && <div className="ok-box">✓ Conversion saved! Liners added to stock.</div>}
       {linerInwardSaved && <div className="ok-box">✓ Liner inward saved! Added to stock.</div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-        <div><div className="section-eyebrow">Liner Inventory</div><h2>Liner Stock</h2></div>
+        {onBack && <button className="btn btn-outline btn-sm" style={{ borderRadius: 20 }} onClick={onBack}>← Stock</button>}
+        <div><div className="section-eyebrow">Liner Inventory</div><h2 style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, letterSpacing: "-0.03em" }}>Liner Stock</h2></div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {!isEmployee && <button className="btn btn-outline" onClick={() => setView("convertHistory")}>🔄 Conversion History</button>}
           {!isEmployee && <button className="btn btn-outline" onClick={() => setView("linerInward")}>+ Add Liner Inward</button>}
@@ -6450,7 +6454,7 @@ function _OldReportsTabBody({ state }) {
 
 
 // ─── GUM STOCK TAB ──────────────────────────────────────────────────────────
-function GumStockTab({ state, update, isEmployee }) {
+function GumStockTab({ state, update, isEmployee, onBack }) {
   const [view, setView] = useState("list"); // "list" | "inward" | "history"
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({ supplier: "", invoiceNo: "", date: "", variantId: "", sackWeight: "", numSacks: "", costRate: "", transportRate: "", waraiRate: "" });
@@ -6689,7 +6693,8 @@ function GumStockTab({ state, update, isEmployee }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }} className="fade-in">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-        <div><div className="section-eyebrow">Gum Inventory</div><h2>Pasting Gum Stock</h2></div>
+        {onBack && <button className="btn btn-outline btn-sm" style={{ borderRadius: 20 }} onClick={onBack}>← Stock</button>}
+        <div><div className="section-eyebrow">Gum Inventory</div><h2 style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, letterSpacing: "-0.03em" }}>Pasting Gum Stock</h2></div>
         {!isEmployee && <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setView("history")}>📋 Inward History</button>
           <button className="btn btn-dark" onClick={() => setView("inward")}>+ Add Inward</button>
