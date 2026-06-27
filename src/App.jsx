@@ -16,8 +16,18 @@ const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 const DATA_REF = "krafttrack_data_v1";
 
-async function cloudSave(data) {
-  await set(ref(db, DATA_REF), data);
+async function cloudSave(data, attempt = 1) {
+  try {
+    await set(ref(db, DATA_REF), data);
+  } catch (e) {
+    const code = e?.code || e?.message || String(e);
+    console.error(`[KraftTrack] Save attempt ${attempt} failed — ${code}`, e);
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+      return cloudSave(data, attempt + 1);
+    }
+    throw e;
+  }
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -313,9 +323,10 @@ export default function App() {
       }
       setSyncing(false);
     }, (error) => {
-      console.error("Firebase read error:", error);
+      const code = error?.code || error?.message || "read error";
+      console.error("[KraftTrack] Firebase read error:", code, error);
       setSyncing(false);
-      setSaveError(true);
+      setSaveError(code);
     });
     return () => unsub();
   }, []);
@@ -324,28 +335,34 @@ export default function App() {
   const saveTimer = useRef(null);
 
   const update = useCallback(fn => {
+    let captured = null;
     setState(prev => {
       const next = JSON.parse(JSON.stringify(prev));
       fn(next);
+      captured = next;
       pendingState.current = next;
       return next;
     });
     hasPendingSave.current = true;
+    setSaveError(false);
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      const toSave = pendingState.current;
+      // Use captured snapshot from this specific update call; fall back to pendingState
+      const toSave = captured || pendingState.current;
       if (!toSave) return;
       cloudSave(toSave)
         .then(() => {
           hasPendingSave.current = false;
           pendingState.current = null;
+          captured = null;
           setLastSaved(new Date());
           setSaveError(false);
         })
         .catch(e => {
-          console.error("Save failed:", e);
+          const code = e?.code || e?.message || "unknown error";
+          console.error("[KraftTrack] Final save failed:", code, e);
           hasPendingSave.current = false;
-          setSaveError(true);
+          setSaveError(code);
         });
     }, 1000);
   }, []);
@@ -522,7 +539,7 @@ export default function App() {
             {syncing
               ? <><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#b0a898", display: "inline-block", marginRight: 5 }} />Syncing…</>
               : saveError
-                ? <><span className="sync-dot-err" />Offline</>
+                ? <><span className="sync-dot-err" />Save failed: {typeof saveError === "string" ? saveError.slice(0, 40) : "offline"}</>
                 : <><span className="sync-dot" />{lastSaved ? "Saved" : "Live"}</>
             }
           </div>
