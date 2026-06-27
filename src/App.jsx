@@ -16,9 +16,15 @@ const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 const DATA_REF = "krafttrack_data_v1";
 
+function stripUndefined(obj) {
+  // Firebase rejects undefined values — strip them by round-tripping through JSON
+  // (JSON.stringify naturally drops undefined keys)
+  return JSON.parse(JSON.stringify(obj));
+}
+
 async function cloudSave(data, attempt = 1) {
   try {
-    await set(ref(db, DATA_REF), data);
+    await set(ref(db, DATA_REF), stripUndefined(data));
   } catch (e) {
     const code = e?.code || e?.message || String(e);
     console.error(`[KraftTrack] Save attempt ${attempt} failed — ${code}`, e);
@@ -335,11 +341,15 @@ export default function App() {
   const saveTimer = useRef(null);
 
   const update = useCallback(fn => {
-    let captured = null;
+    // Build next state synchronously so we always have the correct snapshot to save,
+    // even if React batches/double-invokes the setState updater (Strict Mode).
+    const base = pendingState.current
+      ? JSON.parse(JSON.stringify(pendingState.current))
+      : null;
+    // We still need setState's prev for the very first call when pendingState is null
     setState(prev => {
-      const next = JSON.parse(JSON.stringify(prev));
+      const next = JSON.parse(JSON.stringify(base || prev));
       fn(next);
-      captured = next;
       pendingState.current = next;
       return next;
     });
@@ -347,14 +357,12 @@ export default function App() {
     setSaveError(false);
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      // Use captured snapshot from this specific update call; fall back to pendingState
-      const toSave = captured || pendingState.current;
+      const toSave = pendingState.current;
       if (!toSave) return;
       cloudSave(toSave)
         .then(() => {
           hasPendingSave.current = false;
           pendingState.current = null;
-          captured = null;
           setLastSaved(new Date());
           setSaveError(false);
         })
@@ -364,7 +372,7 @@ export default function App() {
           hasPendingSave.current = false;
           setSaveError(code);
         });
-    }, 1000);
+    }, 800);
   }, []);
 
   const available = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
