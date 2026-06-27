@@ -17,11 +17,7 @@ const db = getDatabase(firebaseApp);
 const DATA_REF = "krafttrack_data_v1";
 
 async function cloudSave(data) {
-  try {
-    await set(ref(db, DATA_REF), data);
-  } catch (e) {
-    console.error("Firebase save error:", e);
-  }
+  await set(ref(db, DATA_REF), data);
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -310,7 +306,7 @@ export default function App() {
           });
           if (needsFix) {
             data = { ...data, stock: fixed };
-            cloudSave(data);
+            cloudSave(data).catch(e => console.error("Migration save error:", e));
           }
         }
         setState({ ...INITIAL_STATE, ...data, linerCustomers: data.linerCustomers || [], transporters: data.transporters || [], gumVariants: data.gumVariants || INITIAL_STATE.gumVariants, gumStock: data.gumStock || [], payments: data.payments || [], cancelledChallans: data.cancelledChallans || [] });
@@ -334,23 +330,24 @@ export default function App() {
       pendingState.current = next;
       return next;
     });
-    // Schedule save outside setState — debounced 500ms
     hasPendingSave.current = true;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      if (!pendingState.current) return;
       const toSave = pendingState.current;
+      if (!toSave) return;
       cloudSave(toSave)
         .then(() => {
           hasPendingSave.current = false;
+          pendingState.current = null;
           setLastSaved(new Date());
           setSaveError(false);
         })
-        .catch(() => {
+        .catch(e => {
+          console.error("Save failed:", e);
           hasPendingSave.current = false;
           setSaveError(true);
         });
-    }, 500);
+    }, 1000);
   }, []);
 
   const available = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
