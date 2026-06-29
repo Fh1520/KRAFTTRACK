@@ -3730,8 +3730,6 @@ function HistoryTab({ state, update }) {
       const byCustomer = {};
       sorted.forEach(p => { if (!byCustomer[p.customer]) byCustomer[p.customer] = []; byCustomer[p.customer].push(p); });
       const isMobile = /Mobi|Android/i.test(navigator.userAgent);
-      const isSingleCustomer = !!invoiceCustFilter;
-      const custName = invoiceCustFilter || "";
       // Get live GST-inclusive amount for each payment
       const getLiveAmt = (p) => {
         const chReels = state.stock.filter(r => r.sold && r.soldChallanNo === p.challanNo && r.soldTo === p.customer);
@@ -3757,7 +3755,7 @@ function HistoryTab({ state, update }) {
         }).join("");
         return `
           <div class="customer-block">
-            ${!isSingleCustomer ? `<div class="cust-name">${cust}</div>` : ""}
+            <div class="cust-name">${cust}</div>
             <table>
               <thead><tr>
                 <th>Challan</th><th>Invoice Date</th><th>Due Date</th><th>Status</th><th style="text-align:right">Amount (incl. GST)</th>
@@ -3770,13 +3768,9 @@ function HistoryTab({ state, update }) {
             </table>
           </div>`;
       }).join("");
-      const summaryLine = isSingleCustomer
-        ? `${sorted.length} overdue invoice${sorted.length !== 1 ? "s" : ""}`
-        : `${sorted.length} overdue invoices · ${Object.keys(byCustomer).length} customers`;
-      const subTitle = isSingleCustomer ? `Overdue Payment Reminder` : `KraftTrack — Overdue Report`;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>${isSingleCustomer ? custName + " — Overdues" : "Overdues"} ${dateStr}</title>
+        <title>Overdues ${dateStr}</title>
         <style>
           @page { margin: 12mm; size: ${isMobile ? "A4 portrait" : "A4 landscape"}; }
           * { box-sizing: border-box; }
@@ -3784,7 +3778,6 @@ function HistoryTab({ state, update }) {
           .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #111; }
           .company { font-size: ${isMobile ? "18px" : "22px"}; font-weight: 800; }
           .sub { font-size: 11px; color: #666; margin-top: 2px; }
-          .cust-header { font-size: ${isMobile ? "15px" : "17px"}; font-weight: 700; color: #c62828; margin-top: 4px; }
           .date-label { font-size: 11px; color: #666; text-align: right; }
           .date-val { font-size: 13px; font-weight: 700; }
           .summary { display: flex; justify-content: space-between; align-items: center; background: #fce4ec; border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; }
@@ -3800,15 +3793,11 @@ function HistoryTab({ state, update }) {
         </style>
       </head><body>
         <div class="header">
-          <div>
-            <div class="company">SK Traders</div>
-            <div class="sub">${subTitle}</div>
-            ${isSingleCustomer ? `<div class="cust-header">${custName}</div>` : ""}
-          </div>
+          <div><div class="company">SK Traders</div><div class="sub">KraftTrack — Overdue Report</div></div>
           <div><div class="date-label">Generated on</div><div class="date-val">${dateStr}</div></div>
         </div>
         <div class="summary">
-          <span class="summary-text">${summaryLine}</span>
+          <span class="summary-text">${sorted.length} overdue invoices · ${Object.keys(byCustomer).length} customers</span>
           <span class="summary-amt">${fmtRs(total)}</span>
         </div>
         ${rows}
@@ -3824,9 +3813,7 @@ function HistoryTab({ state, update }) {
           <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>← Back</button>
           <div><div className="section-eyebrow">Customers</div><h2>{titleMap[invoiceListFilter] || "Invoices"}</h2></div>
           {invoiceListFilter === "overdue" && (
-            <button className="btn btn-dark btn-sm" style={{ marginLeft: "auto" }} onClick={exportOverduePDF}>
-              ⬇ {invoiceCustFilter ? `Export ${invoiceCustFilter.split(" ")[0]} PDF` : "Export PDF"}
-            </button>
+            <button className="btn btn-dark btn-sm" style={{ marginLeft: "auto" }} onClick={exportOverduePDF}>⬇ Export PDF</button>
           )}
         </div>
         {/* Overdue time filters */}
@@ -5040,7 +5027,7 @@ function ReportsTab({ state }) {
       </div>
       {/* Section switcher */}
       <div style={{ display: "flex", gap: 4, background: "#f5f0e8", borderRadius: 10, padding: 4, alignSelf: "flex-start", flexWrap: "wrap" }}>
-        {[["reels","📦 Reels"],["liner","📄 Liner"],["gum","🪣 Gum"],["business","🏢 Full Business"],["payments","💳 Payments"]].map(([t, label]) => (
+        {[["reels","📦 Reels"],["liner","📄 Liner"],["gum","🪣 Gum"],["business","🏢 Full Business"],["payments","💳 Payments"],["stockvalue","📋 Stock Value"]].map(([t, label]) => (
           <button key={t} onClick={() => setReportTab(t)}
             style={{ padding: "7px 16px", borderRadius: 7, border: "none", background: reportTab === t ? "#fff" : "transparent", color: reportTab === t ? "#1a1a1a" : "#8b6914", fontWeight: reportTab === t ? 600 : 400, fontSize: 13, cursor: "pointer", boxShadow: reportTab === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>
             {label}
@@ -5052,6 +5039,7 @@ function ReportsTab({ state }) {
       {reportTab === "gum" && <GumReport state={state} soldData={gumSold} showGST={showGST} />}
       {reportTab === "business" && <BusinessReport state={state} reelSold={reelSold} linerSold={linerSold} gumSold={gumSold} allSold={allSold} showGST={showGST} />}
       {reportTab === "payments" && <PaymentsReport state={state} />}
+      {reportTab === "stockvalue" && <StockValueReport state={state} />}
     </div>
   );
 }
@@ -5674,6 +5662,135 @@ function BusinessReport({ state, reelSold, linerSold, gumSold, allSold, showGST 
 
 
 // ─── OLD REPORTS TAB SHELL (now empty — replaced above) ──────────────────────
+// ─── STOCK VALUE REPORT ───────────────────────────────────────────────────────
+function StockValueReport({ state }) {
+  const [filter, setFilter] = useState("all"); // "all" | "reels" | "liner" | "gum"
+
+  const reels  = state.stock.filter(r => !r.sold && r.productType !== "liner" && !r.converted);
+  const liners = state.stock.filter(r => !r.sold && r.productType === "liner");
+  const gum    = (state.gumStock || []).filter(g => !g.sold);
+
+  // Landed cost = costRate + transportRate + waraiRate (uses existing landedRate helper)
+  const reelValue  = reels.reduce((s, r)  => s + landedRate(r) * Number(r.weight || 0), 0);
+  const linerValue = liners.reduce((s, r) => s + landedRate(r) * Number(r.weight || 0), 0);
+  const gumValue   = gum.reduce((s, g)   => s + landedRate(g) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+  const totalValue = reelValue + linerValue + gumValue;
+
+  const reelKg  = reels.reduce((s, r)  => s + Number(r.weight || 0), 0);
+  const linerKg = liners.reduce((s, r) => s + Number(r.weight || 0), 0);
+  const gumKg   = gum.reduce((s, g)   => s + Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT), 0);
+
+  const reelGradeMap = {};
+  reels.forEach(r => {
+    const k = `${r.bf} BF ${r.gsm} GSM ${r.shade || ""}`.trim();
+    if (!reelGradeMap[k]) reelGradeMap[k] = { label: k, count: 0, kg: 0, value: 0 };
+    reelGradeMap[k].count++;
+    reelGradeMap[k].kg    += Number(r.weight || 0);
+    reelGradeMap[k].value += landedRate(r) * Number(r.weight || 0);
+  });
+
+  const linerGradeMap = {};
+  liners.forEach(r => {
+    const k = `${r.bf} BF ${r.gsm} GSM`.trim();
+    if (!linerGradeMap[k]) linerGradeMap[k] = { label: k, count: 0, kg: 0, value: 0 };
+    linerGradeMap[k].count++;
+    linerGradeMap[k].kg    += Number(r.weight || 0);
+    linerGradeMap[k].value += landedRate(r) * Number(r.weight || 0);
+  });
+
+  const gumVariantMap = {};
+  gum.forEach(g => {
+    const k = g.variantName || "Unknown";
+    if (!gumVariantMap[k]) gumVariantMap[k] = { label: k, count: 0, kg: 0, value: 0 };
+    gumVariantMap[k].count++;
+    gumVariantMap[k].kg    += Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+    gumVariantMap[k].value += landedRate(g) * Number(g.sackWeight || DEFAULT_GUM_SACK_WEIGHT);
+  });
+
+  const summaryCards = [
+    { key: "all",   label: "All Stock",  value: totalValue, kg: reelKg + linerKg + gumKg, count: reels.length + liners.length + gum.length, color: "#111",    bg: "#f5f0e8" },
+    { key: "reels", label: "📦 Reels",   value: reelValue,  kg: reelKg,  count: reels.length,  color: "#b8860b", bg: "#fff8e7" },
+    { key: "liner", label: "📄 Liner",   value: linerValue, kg: linerKg, count: liners.length, color: "#2a5a8a", bg: "#f0f5ff" },
+    { key: "gum",   label: "🪣 Gum",     value: gumValue,   kg: gumKg,   count: gum.length,    color: "#4a8a3a", bg: "#f0f7ea" },
+  ];
+
+  const showReels = filter === "all" || filter === "reels";
+  const showLiner = filter === "all" || filter === "liner";
+  const showGum   = filter === "all" || filter === "gum";
+
+  const BreakdownTable = ({ rows, unit = "reels" }) => {
+    if (rows.length === 0) return <div style={{ fontSize: 13, color: "#aaa", fontStyle: "italic", padding: "12px 0" }}>No stock.</div>;
+    return (
+      <div style={{ border: "1px solid #e8e2d8", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 80px 100px", background: "#111", padding: "7px 14px", gap: 8 }}>
+          {["Grade / Variant", unit === "sacks" ? "Sacks" : "Reels", "Weight", "Value"].map((h, i) => (
+            <div key={h} style={{ fontSize: 10, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: i > 0 ? "right" : "left" }}>{h}</div>
+          ))}
+        </div>
+        {rows.map((r, i) => (
+          <div key={r.label} style={{ display: "grid", gridTemplateColumns: "1fr 60px 80px 100px", padding: "10px 14px", gap: 8, borderTop: "1px solid #f0ece4", background: i % 2 === 0 ? "#fff" : "#faf8f4", alignItems: "center" }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
+            <div style={{ fontSize: 13, textAlign: "right", color: "#555" }}>{r.count}</div>
+            <div style={{ fontSize: 13, textAlign: "right", color: "#555" }}>{fmt(Math.round(r.kg))} kg</div>
+            <div style={{ fontSize: 13, textAlign: "right", fontWeight: 700 }}>{r.value > 0 ? fmtRs(r.value) : "—"}</div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+        {summaryCards.map(c => (
+          <div key={c.key} onClick={() => setFilter(c.key)}
+            className="card" style={{ padding: "14px 16px", cursor: "pointer", background: filter === c.key ? c.bg : "#fff", border: filter === c.key ? `2px solid ${c.color}` : "2px solid transparent", transition: "all 0.15s" }}>
+            <div className="lbl" style={{ color: c.color }}>{c.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.2, color: "#111", letterSpacing: "-0.02em" }}>{c.value > 0 ? fmtRs(Math.round(c.value)) : "—"}</div>
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>{c.count} items · {fmt(Math.round(c.kg))} kg</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic" }}>Landed cost — purchase price + transport + warai. Excludes GST.</div>
+
+      {showReels && reels.length > 0 && (
+        <div className="card">
+          <h3 style={{ color: "#b8860b", marginBottom: 12 }}>📦 Reels — Grade Breakdown</h3>
+          <BreakdownTable rows={Object.values(reelGradeMap).sort((a, b) => b.value - a.value)} />
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 10, fontSize: 13, fontWeight: 700 }}>
+            Total: {fmtRs(Math.round(reelValue))} &nbsp;·&nbsp; {fmt(Math.round(reelKg))} kg
+          </div>
+        </div>
+      )}
+
+      {showLiner && liners.length > 0 && (
+        <div className="card">
+          <h3 style={{ color: "#2a5a8a", marginBottom: 12 }}>📄 Liner — Grade Breakdown</h3>
+          <BreakdownTable rows={Object.values(linerGradeMap).sort((a, b) => b.value - a.value)} />
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 10, fontSize: 13, fontWeight: 700 }}>
+            Total: {fmtRs(Math.round(linerValue))} &nbsp;·&nbsp; {fmt(Math.round(linerKg))} kg
+          </div>
+        </div>
+      )}
+
+      {showGum && gum.length > 0 && (
+        <div className="card">
+          <h3 style={{ color: "#4a8a3a", marginBottom: 12 }}>🪣 Gum — Variant Breakdown</h3>
+          <BreakdownTable rows={Object.values(gumVariantMap).sort((a, b) => b.value - a.value)} unit="sacks" />
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 10, fontSize: 13, fontWeight: 700 }}>
+            Total: {fmtRs(Math.round(gumValue))} &nbsp;·&nbsp; {fmt(Math.round(gumKg))} kg
+          </div>
+        </div>
+      )}
+
+      {(filter === "all" ? totalValue : filter === "reels" ? reelValue : filter === "liner" ? linerValue : gumValue) === 0 && (
+        <div className="card" style={{ textAlign: "center", padding: 40, color: "#aaa", fontStyle: "italic" }}>No unsold stock in this category.</div>
+      )}
+    </div>
+  );
+}
+
 // ─── PAYMENTS REPORT ─────────────────────────────────────────────────────────
 function PaymentsReport({ state }) {
   const payments = state.payments || [];
