@@ -3730,6 +3730,8 @@ function HistoryTab({ state, update }) {
       const byCustomer = {};
       sorted.forEach(p => { if (!byCustomer[p.customer]) byCustomer[p.customer] = []; byCustomer[p.customer].push(p); });
       const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+      const isSingleCustomer = !!invoiceCustFilter;
+      const custName = invoiceCustFilter || "";
       // Get live GST-inclusive amount for each payment
       const getLiveAmt = (p) => {
         const chReels = state.stock.filter(r => r.sold && r.soldChallanNo === p.challanNo && r.soldTo === p.customer);
@@ -3755,7 +3757,7 @@ function HistoryTab({ state, update }) {
         }).join("");
         return `
           <div class="customer-block">
-            <div class="cust-name">${cust}</div>
+            ${!isSingleCustomer ? `<div class="cust-name">${cust}</div>` : ""}
             <table>
               <thead><tr>
                 <th>Challan</th><th>Invoice Date</th><th>Due Date</th><th>Status</th><th style="text-align:right">Amount (incl. GST)</th>
@@ -3768,9 +3770,13 @@ function HistoryTab({ state, update }) {
             </table>
           </div>`;
       }).join("");
+      const summaryLine = isSingleCustomer
+        ? `${sorted.length} overdue invoice${sorted.length !== 1 ? "s" : ""}`
+        : `${sorted.length} overdue invoices · ${Object.keys(byCustomer).length} customers`;
+      const subTitle = isSingleCustomer ? `Overdue Payment Reminder` : `KraftTrack — Overdue Report`;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>Overdues ${dateStr}</title>
+        <title>${isSingleCustomer ? custName + " — Overdues" : "Overdues"} ${dateStr}</title>
         <style>
           @page { margin: 12mm; size: ${isMobile ? "A4 portrait" : "A4 landscape"}; }
           * { box-sizing: border-box; }
@@ -3778,6 +3784,7 @@ function HistoryTab({ state, update }) {
           .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #111; }
           .company { font-size: ${isMobile ? "18px" : "22px"}; font-weight: 800; }
           .sub { font-size: 11px; color: #666; margin-top: 2px; }
+          .cust-header { font-size: ${isMobile ? "15px" : "17px"}; font-weight: 700; color: #c62828; margin-top: 4px; }
           .date-label { font-size: 11px; color: #666; text-align: right; }
           .date-val { font-size: 13px; font-weight: 700; }
           .summary { display: flex; justify-content: space-between; align-items: center; background: #fce4ec; border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; }
@@ -3793,11 +3800,15 @@ function HistoryTab({ state, update }) {
         </style>
       </head><body>
         <div class="header">
-          <div><div class="company">SK Traders</div><div class="sub">KraftTrack — Overdue Report</div></div>
+          <div>
+            <div class="company">SK Traders</div>
+            <div class="sub">${subTitle}</div>
+            ${isSingleCustomer ? `<div class="cust-header">${custName}</div>` : ""}
+          </div>
           <div><div class="date-label">Generated on</div><div class="date-val">${dateStr}</div></div>
         </div>
         <div class="summary">
-          <span class="summary-text">${sorted.length} overdue invoices · ${Object.keys(byCustomer).length} customers</span>
+          <span class="summary-text">${summaryLine}</span>
           <span class="summary-amt">${fmtRs(total)}</span>
         </div>
         ${rows}
@@ -3813,7 +3824,9 @@ function HistoryTab({ state, update }) {
           <button className="btn btn-outline btn-sm" onClick={() => setCustView("customers")}>← Back</button>
           <div><div className="section-eyebrow">Customers</div><h2>{titleMap[invoiceListFilter] || "Invoices"}</h2></div>
           {invoiceListFilter === "overdue" && (
-            <button className="btn btn-dark btn-sm" style={{ marginLeft: "auto" }} onClick={exportOverduePDF}>⬇ Export PDF</button>
+            <button className="btn btn-dark btn-sm" style={{ marginLeft: "auto" }} onClick={exportOverduePDF}>
+              ⬇ {invoiceCustFilter ? `Export ${invoiceCustFilter.split(" ")[0]} PDF` : "Export PDF"}
+            </button>
           )}
         </div>
         {/* Overdue time filters */}
